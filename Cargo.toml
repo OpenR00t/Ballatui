@@ -1,0 +1,32 @@
+[package]
+name = "ballatui"
+version = "0.1.0"
+edition = "2024"
+description = "Live baseball in the terminal: scoreboard, gamecast, box score, scorecard and standings from the MLB Stats API"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+keywords = ["baseball", "mlb", "tui", "ratatui", "scorecard"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+directories = "6.0"
+ratatui = "0.30"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+unicode-width = "0.2.2"
+
+# Windows uses the built-in SChannel TLS so no extra C toolchain is needed;
+# other platforms use rustls.
+[target.'cfg(windows)'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "gzip", "native-tls", "charset", "http2"] }
+
+[target.'cfg(not(windows))'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "gzip", "rustls", "charset", "http2"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
