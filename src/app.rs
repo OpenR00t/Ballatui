@@ -5,7 +5,7 @@
 
 use crate::api::Api;
 use crate::config::Config;
-use crate::game::{Cursor, LogLine, play_log};
+use crate::game::{BattedBall, Cursor, LogLine, batted_balls, play_log};
 use crate::model::{GameFeed, ScheduleGame, Standings};
 use crate::stats::{ArsenalPitch, League, Load, PlayerStats, Stat, StatsCache};
 use anyhow::Result;
@@ -26,6 +26,7 @@ pub enum Msg {
     Arsenal(u64, i32, Result<Vec<ArsenalPitch>>),
     HeadToHead((u64, u64), Result<Option<Stat>>),
     League(i32, Result<League>),
+    Venue(u64, Result<Option<crate::model::FieldInfo>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,15 +55,17 @@ impl StandingsKind {
 pub enum GameTab {
     Gamecast,
     Matchup,
+    Spray,
     Box,
     Scorecard,
     Plays,
 }
 
 impl GameTab {
-    pub const ALL: [GameTab; 5] = [
+    pub const ALL: [GameTab; 6] = [
         Self::Gamecast,
         Self::Matchup,
+        Self::Spray,
         Self::Box,
         Self::Scorecard,
         Self::Plays,
@@ -71,6 +74,7 @@ impl GameTab {
         match self {
             Self::Gamecast => "Gamecast",
             Self::Matchup => "Matchup",
+            Self::Spray => "Spray",
             Self::Box => "Box score",
             Self::Scorecard => "Scorecard",
             Self::Plays => "Plays",
@@ -80,6 +84,7 @@ impl GameTab {
         match self {
             Self::Gamecast => 'c',
             Self::Matchup => 'm',
+            Self::Spray => 'y',
             Self::Box => 'b',
             Self::Scorecard => 's',
             Self::Plays => 'p',
@@ -89,6 +94,24 @@ impl GameTab {
 
 /// How far `[` / `]` look for a day with games.
 pub const SEARCH_DAYS: i64 = 150;
+
+/// Which team's balls in play the spray chart shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SprayTeam {
+    Both,
+    Away,
+    Home,
+}
+
+impl SprayTeam {
+    fn next(self) -> Self {
+        match self {
+            Self::Both => Self::Away,
+            Self::Away => Self::Home,
+            Self::Home => Self::Both,
+        }
+    }
+}
 
 pub const SPEEDS: [f64; 7] = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0];
 
@@ -115,6 +138,10 @@ pub struct GameView {
     pub plays_sel: usize,
     /// Number of log lines in the last drawn plays list (for clamping).
     pub plays_len: usize,
+    pub spray_sel: usize,
+    pub spray_team: SprayTeam,
+    /// Only the batter at the shown moment.
+    pub spray_batter_only: bool,
 }
 
 impl GameView {
@@ -137,6 +164,9 @@ impl GameView {
             hscroll: 0,
             plays_sel: 0,
             plays_len: 0,
+            spray_sel: usize::MAX,
+            spray_team: SprayTeam::Both,
+            spray_batter_only: false,
         }
     }
 
@@ -173,6 +203,40 @@ impl GameView {
             Some(c) if Some(c) == Cursor::end(plays) => None,
             other => other,
         };
+    }
+
+    /// Balls in play shown on the spray chart, after the filters.
+    pub fn spray_balls(&self) -> Vec<BattedBall> {
+        let Some(c) = self.at() else {
+            return Vec::new();
+        };
+        let plays = self.plays();
+        let batter = plays.get(c.play).map(|p| p.matchup.batter.id);
+        batted_balls(plays, c)
+            .into_iter()
+            .filter(|b| match self.spray_team {
+                SprayTeam::Both => true,
+                SprayTeam::Away => b.top,
+                SprayTeam::Home => !b.top,
+            })
+            .filter(|b| !self.spray_batter_only || Some(b.batter) == batter)
+            .collect()
+    }
+
+    /// The selectable list on the current tab, if it has one.
+    fn list_sel(&mut self) -> Option<(&mut usize, usize)> {
+        match self.tab {
+            GameTab::Plays => Some((&mut self.plays_sel, self.plays_len)),
+            GameTab::Spray => {
+                let len = self.spray_balls().len();
+                // usize::MAX means "newest", so new balls stay selected live.
+                if self.spray_sel >= len {
+                    self.spray_sel = len.saturating_sub(1);
+                }
+                Some((&mut self.spray_sel, len))
+            }
+            _ => None,
+        }
     }
 
     pub fn log(&self) -> Vec<LogLine> {
@@ -427,6 +491,13 @@ impl App {
                             .unwrap_or_else(|e| Load::Failed(format!("{e:#}"))),
                     );
                 }
+                Msg::Venue(id, r) => {
+                    self.stats.venues.insert(
+                        id,
+                        r.map(Load::Ready)
+                            .unwrap_or_else(|e| Load::Failed(format!("{e:#}"))),
+                    );
+                }
                 Msg::Standings(kind, r) => {
                     self.standings_loading = false;
                     self.standings_error = None;
@@ -514,6 +585,14 @@ impl App {
         if season == 0 {
             return;
         }
+        let venue = feed.game_data.venue.id;
+        if venue != 0 && !self.stats.venues.contains_key(&venue) {
+            self.stats.venues.insert(venue, Load::Loading);
+            let (tx, api) = (self.tx.clone(), self.api.clone());
+            thread::spawn(move || {
+                let _ = tx.send(Msg::Venue(venue, api.venue(venue)));
+            });
+        }
         let (b, p) = (play.matchup.batter.id, play.matchup.pitcher.id);
         let missing: Vec<u64> = [b, p]
             .into_iter()
@@ -573,8 +652,8 @@ impl App {
             }
             Screen::Game => {
                 if let Some(g) = self.game.as_mut() {
-                    if g.tab == GameTab::Plays {
-                        g.plays_sel = add_usize(g.plays_sel, delta.signum(), g.plays_len);
+                    if let Some((sel, len)) = g.list_sel() {
+                        *sel = add_usize(*sel, delta.signum(), len);
                     } else {
                         g.scroll = add(g.scroll, delta);
                     }
@@ -758,6 +837,14 @@ impl App {
                 g.tab = *GameTab::ALL.iter().find(|t| t.key() == c).unwrap();
                 g.scroll = 0;
             }
+            KeyCode::Char('t') if g.tab == GameTab::Spray => {
+                g.spray_team = g.spray_team.next();
+                g.spray_sel = usize::MAX;
+            }
+            KeyCode::Char('a') if g.tab == GameTab::Spray => {
+                g.spray_batter_only = !g.spray_batter_only;
+                g.spray_sel = usize::MAX;
+            }
             KeyCode::Char('t') => g.home_side = !g.home_side,
             KeyCode::Char('r') => {
                 refresh = true;
@@ -831,29 +918,29 @@ impl App {
             }
             // Scrolling.
             KeyCode::Char('j') | KeyCode::Down => {
-                if g.tab == GameTab::Plays {
-                    g.plays_sel = add_usize(g.plays_sel, 1, g.plays_len);
+                if let Some((sel, len)) = g.list_sel() {
+                    *sel = add_usize(*sel, 1, len);
                 } else {
                     g.scroll = add(g.scroll, 1);
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if g.tab == GameTab::Plays {
-                    g.plays_sel = add_usize(g.plays_sel, -1, g.plays_len);
+                if let Some((sel, len)) = g.list_sel() {
+                    *sel = add_usize(*sel, -1, len);
                 } else {
                     g.scroll = add(g.scroll, -1);
                 }
             }
             KeyCode::Char('d') if ctrl => {
-                if g.tab == GameTab::Plays {
-                    g.plays_sel = add_usize(g.plays_sel, 10, g.plays_len);
+                if let Some((sel, len)) = g.list_sel() {
+                    *sel = add_usize(*sel, 10, len);
                 } else {
                     g.scroll = add(g.scroll, 10);
                 }
             }
             KeyCode::Char('u') if ctrl => {
-                if g.tab == GameTab::Plays {
-                    g.plays_sel = add_usize(g.plays_sel, -10, g.plays_len);
+                if let Some((sel, len)) = g.list_sel() {
+                    *sel = add_usize(*sel, -10, len);
                 } else {
                     g.scroll = add(g.scroll, -10);
                 }
@@ -861,14 +948,30 @@ impl App {
             KeyCode::Char('g') if gg => {
                 g.scroll = 0;
                 g.plays_sel = 0;
+                g.spray_sel = 0;
             }
             KeyCode::Char('g') => self.pending_g = true,
             KeyCode::Char('G') => {
                 g.scroll = u16::MAX / 2;
                 g.plays_sel = g.plays_len.saturating_sub(1);
+                g.spray_sel = usize::MAX;
             }
             KeyCode::Char('<') | KeyCode::Char(',') => g.hscroll = g.hscroll.saturating_sub(8),
             KeyCode::Char('>') | KeyCode::Char('.') => g.hscroll = g.hscroll.saturating_add(8),
+            KeyCode::Enter if g.tab == GameTab::Spray => {
+                let balls = g.spray_balls();
+                if let Some(b) = balls.get(g.spray_sel.min(balls.len().saturating_sub(1))) {
+                    let p = b.play;
+                    let ev = g.plays()[p].play_events.len();
+                    g.replay.playing = false;
+                    g.set_cursor(Some(Cursor {
+                        play: p,
+                        events: ev,
+                    }));
+                    g.tab = GameTab::Gamecast;
+                    g.scroll = 0;
+                }
+            }
             KeyCode::Enter if g.tab == GameTab::Plays => {
                 let log = g.log();
                 if let Some(line) = log.get(g.plays_sel) {

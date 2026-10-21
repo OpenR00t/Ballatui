@@ -4,7 +4,9 @@
 //! The game screen frame: header, linescore and tab bar around the four
 //! game tabs.
 
-use super::{boxscore, gamecast, matchup, message, ordinal, pad, panel, plays, rpad, scorecard};
+use super::{
+    boxscore, gamecast, matchup, message, ordinal, pad, panel, plays, rpad, scorecard, spray,
+};
 use crate::app::{App, GameTab, GameView, SPEEDS};
 use crate::game::{Cursor, Situation, total_steps};
 use crate::model::GameFeed;
@@ -72,6 +74,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     match g.tab {
         GameTab::Gamecast => gamecast::draw(f, &ctx, g.scroll, body),
         GameTab::Matchup => matchup::draw(f, &ctx, body),
+        GameTab::Spray => spray::draw(f, &ctx, g, body),
         GameTab::Box => boxscore::draw(f, &ctx, g.home_side, g.scroll, body),
         GameTab::Scorecard => scorecard::draw(f, &ctx, g.home_side, g.scroll, g.hscroll, body),
         GameTab::Plays => {

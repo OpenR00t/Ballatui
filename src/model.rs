@@ -465,6 +465,71 @@ pub struct HitData {
     pub total_distance: Option<f64>,
     pub trajectory: Option<String>,
     pub location: Option<String>,
+    pub coordinates: HitCoords,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HitCoords {
+    pub coord_x: Option<f64>,
+    pub coord_y: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Venues {
+    pub venues: Vec<Venue>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Venue {
+    pub id: u64,
+    pub name: String,
+    pub field_info: Option<FieldInfo>,
+}
+
+/// Fence distances in feet. `left`/`right` (between the line and the gap)
+/// are missing for some parks.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct FieldInfo {
+    pub left_line: Option<f64>,
+    pub left: Option<f64>,
+    pub left_center: Option<f64>,
+    pub center: Option<f64>,
+    pub right_center: Option<f64>,
+    pub right: Option<f64>,
+    pub right_line: Option<f64>,
+}
+
+impl FieldInfo {
+    /// Fence distance at an angle from straightaway center (degrees,
+    /// negative toward left field), interpolated between the known points.
+    pub fn fence_at(&self, angle: f64) -> f64 {
+        let ll = self.left_line.unwrap_or(330.0);
+        let lc = self.left_center.unwrap_or(375.0);
+        let c = self.center.unwrap_or(400.0);
+        let rc = self.right_center.unwrap_or(375.0);
+        let rl = self.right_line.unwrap_or(330.0);
+        let mut pts: Vec<(f64, f64)> = vec![(-45.0, ll)];
+        if let Some(l) = self.left {
+            pts.push((-34.0, l));
+        }
+        pts.extend([(-22.5, lc), (0.0, c), (22.5, rc)]);
+        if let Some(r) = self.right {
+            pts.push((34.0, r));
+        }
+        pts.push((45.0, rl));
+        let a = angle.clamp(-45.0, 45.0);
+        for w in pts.windows(2) {
+            let ((a0, d0), (a1, d1)) = (w[0], w[1]);
+            if a >= a0 && a <= a1 {
+                return d0 + (d1 - d0) * (a - a0) / (a1 - a0);
+            }
+        }
+        c
+    }
 }
 
 // ---------------------------------------------------------------- boxscore

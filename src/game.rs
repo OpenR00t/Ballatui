@@ -755,6 +755,95 @@ pub fn play_log(plays: &[Play], cursor: Cursor) -> Vec<LogLine> {
     out
 }
 
+/// A ball put in play, for the spray chart.
+#[derive(Debug, Clone)]
+pub struct BattedBall {
+    pub play: usize,
+    pub inning: u32,
+    pub top: bool,
+    pub batter: u64,
+    pub batter_name: String,
+    pub event_type: String,
+    /// Scorebook notation of the result (`1B`, `F8`, `6-3`…).
+    pub result: String,
+    pub launch_speed: Option<f64>,
+    pub launch_angle: Option<f64>,
+    pub distance: Option<f64>,
+    pub trajectory: Option<String>,
+    /// Feet from home plate: x toward right field, y toward center.
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Where Gameday's batted-ball coordinates put home plate, and feet per
+/// unit (fitted to home-run distances).
+const PLATE: (f64, f64) = (126.0, 200.5);
+const FEET_PER_UNIT: f64 = 2.44;
+
+pub fn gameday_to_feet(cx: f64, cy: f64) -> (f64, f64) {
+    (
+        (cx - PLATE.0) * FEET_PER_UNIT,
+        (PLATE.1 - cy) * FEET_PER_UNIT,
+    )
+}
+
+/// Balls in play up to the cursor, in game order.
+pub fn batted_balls(plays: &[Play], cursor: Cursor) -> Vec<BattedBall> {
+    let mut out = Vec::new();
+    for (i, play) in plays.iter().enumerate().take(cursor.play + 1) {
+        let shown = if i < cursor.play {
+            play.play_events.len()
+        } else {
+            cursor.events.min(play.play_events.len())
+        };
+        let whole = shown == play.play_events.len() && play.about.is_complete;
+        for e in &play.play_events[..shown] {
+            let Some(h) = &e.hit_data else { continue };
+            let (Some(cx), Some(cy)) = (h.coordinates.coord_x, h.coordinates.coord_y) else {
+                continue;
+            };
+            let (x, y) = gameday_to_feet(cx, cy);
+            out.push(BattedBall {
+                play: i,
+                inning: play.about.inning,
+                top: play.about.is_top_inning,
+                batter: play.matchup.batter.id,
+                batter_name: play.matchup.batter.full_name.clone(),
+                event_type: if whole {
+                    play.result.event_type.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                result: if whole { notation(play) } else { "…".into() },
+                launch_speed: h.launch_speed,
+                launch_angle: h.launch_angle,
+                distance: h.total_distance,
+                trajectory: h.trajectory.clone(),
+                x,
+                y,
+            });
+        }
+    }
+    out
+}
+
+/// Statcast's barrel zone: at least 98 mph, with a launch-angle window
+/// (26-30 degrees at 98) that widens as exit velocity rises, to 8-50 at 116+.
+pub fn is_barrel(ev: f64, la: f64) -> bool {
+    if ev < 98.0 {
+        return false;
+    }
+    let (lo, hi) = match ev {
+        e if e < 99.0 => (26.0, 30.0),
+        e if e < 100.0 => (25.0, 31.0),
+        e => {
+            let over = (e - 100.0).min(16.0);
+            (24.0 - over, 33.0 + over * 17.0 / 16.0)
+        }
+    };
+    la >= lo && la <= hi
+}
+
 /// Last name for compact displays.
 pub fn last_name(feed: &GameFeed, id: u64, fallback: &str) -> String {
     feed.game_data
@@ -873,6 +962,25 @@ mod tests {
             pitch("C", 1, 2)
         ));
         assert_eq!(notation(&k), "KL");
+    }
+
+    #[test]
+    fn barrel_zone() {
+        assert!(is_barrel(98.5, 28.0));
+        assert!(!is_barrel(98.5, 20.0));
+        assert!(!is_barrel(97.9, 28.0));
+        assert!(is_barrel(110.0, 15.0));
+        assert!(is_barrel(120.0, 9.0));
+        assert!(!is_barrel(120.0, 55.0));
+    }
+
+    #[test]
+    fn gameday_coordinates_to_feet() {
+        let (x, y) = gameday_to_feet(126.0, 200.5);
+        assert!(x.abs() < 1e-9 && y.abs() < 1e-9);
+        // Straightaway center, 100 units out = 244 ft.
+        let (x, y) = gameday_to_feet(126.0, 100.5);
+        assert!(x.abs() < 1e-9 && (y - 244.0).abs() < 1e-9);
     }
 
     #[test]

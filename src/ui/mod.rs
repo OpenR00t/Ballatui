@@ -11,6 +11,7 @@ mod matchup;
 mod plays;
 mod scoreboard;
 mod scorecard;
+mod spray;
 mod standings;
 
 use crate::app::{App, Screen};
@@ -99,7 +100,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             ("q", "quit"),
         ],
         Screen::Game => &[
-            ("c m b s p", "tabs"),
+            ("c m y b s p", "tabs"),
             ("h/l", "pitch"),
             ("[ ]", "at-bat"),
             ("␣", "replay"),
@@ -149,9 +150,10 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             "Game",
             &[
                 (
-                    "c m b s p  Tab",
-                    "gamecast · matchup · box · scorecard · plays",
+                    "c m y b s p",
+                    "gamecast · matchup · spray · box · card · plays",
                 ),
+                ("Tab", "next tab"),
                 ("h l", "step back / forward one pitch"),
                 ("[ ]", "previous / next at-bat"),
                 ("0", "first pitch"),
@@ -159,7 +161,8 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
                 ("Space", "replay / pause (from the end, starts at pitch 1)"),
                 ("R", "replay from the first pitch"),
                 ("+ -", "replay speed"),
-                ("t", "away / home team (box score, scorecard)"),
+                ("t", "team: box, scorecard · spray: both/away/home"),
+                ("a", "spray: only the batter now up"),
                 ("j k  Ctrl-d/u", "scroll · in Plays, ⏎ jumps to that play"),
                 ("< >", "scroll the scorecard sideways"),
                 ("r  esc", "refresh · back"),

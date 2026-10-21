@@ -281,6 +281,8 @@ pub struct StatsCache {
     pub arsenal: HashMap<(u64, i32), Load<Vec<ArsenalPitch>>>,
     pub head_to_head: HashMap<(u64, u64), Load<Option<Stat>>>,
     pub league: HashMap<i32, Load<League>>,
+    /// Fence distances per venue, for the spray chart.
+    pub venues: HashMap<u64, Load<Option<crate::model::FieldInfo>>>,
 }
 
 impl StatsCache {
@@ -290,6 +292,7 @@ impl StatsCache {
         self.head_to_head
             .retain(|_, v| !matches!(v, Load::Failed(_)));
         self.league.retain(|_, v| !matches!(v, Load::Failed(_)));
+        self.venues.retain(|_, v| !matches!(v, Load::Failed(_)));
     }
 
     pub fn player(&self, id: u64, season: i32) -> Option<&PlayerStats> {

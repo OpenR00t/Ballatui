@@ -3,7 +3,7 @@
 
 //! Blocking client for the public MLB Stats API.
 
-use crate::model::{GameFeed, Schedule, Standings};
+use crate::model::{FieldInfo, GameFeed, Schedule, Standings, Venues};
 use crate::stats::{
     ArsenalPitch, League, People, PlayerStats, Stat, StatsResponse, arsenal_from,
     head_to_head_from, league_from,
@@ -109,6 +109,11 @@ impl Api {
         let h: StatsResponse = self.get(&path("hitting"))?;
         let p: StatsResponse = self.get(&path("pitching"))?;
         Ok(league_from(&h, &p))
+    }
+
+    pub fn venue(&self, id: u64) -> Result<Option<FieldInfo>> {
+        let v: Venues = self.get(&format!("/api/v1/venues/{id}?hydrate=fieldInfo"))?;
+        Ok(v.venues.into_iter().next().and_then(|v| v.field_info))
     }
 
     pub fn standings(&self, season: i32, kind: &str) -> Result<Standings> {
