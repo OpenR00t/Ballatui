@@ -454,6 +454,8 @@ pub struct PitchCoords {
 pub struct Breaks {
     pub spin_rate: Option<f64>,
     pub break_vertical_induced: Option<f64>,
+    /// Inches, catcher's view: positive toward third base (a right-hander's
+    /// arm side).
     pub break_horizontal: Option<f64>,
 }
 

@@ -844,6 +844,110 @@ pub fn is_barrel(ev: f64, la: f64) -> bool {
     la >= lo && la <= hi
 }
 
+/// One pitch, for the per-game pitch mix.
+#[derive(Debug, Clone)]
+pub struct PitchRec {
+    pub pitcher: u64,
+    pub code: String,
+    pub name: String,
+    pub inning: u32,
+    pub speed: Option<f64>,
+    pub spin: Option<f64>,
+    /// Induced vertical break, inches.
+    pub ivb: Option<f64>,
+    /// Horizontal break, inches, positive toward the pitcher's arm side.
+    pub hb_arm: Option<f64>,
+    pub call: String,
+    pub launch_speed: Option<f64>,
+}
+
+/// A pitcher who has appeared, in order of appearance.
+#[derive(Debug, Clone)]
+pub struct GamePitcher {
+    pub id: u64,
+    pub name: String,
+    /// Pitching for the home team (the top half's defense).
+    pub home: bool,
+    pub pitches: u32,
+}
+
+/// Every pitch thrown up to the cursor, and the pitchers in order.
+pub fn pitches(plays: &[Play], cursor: Cursor) -> (Vec<PitchRec>, Vec<GamePitcher>) {
+    let mut recs = Vec::new();
+    let mut pitchers: Vec<GamePitcher> = Vec::new();
+    for (i, play) in plays.iter().enumerate().take(cursor.play + 1) {
+        let shown = if i < cursor.play {
+            play.play_events.len()
+        } else {
+            cursor.events.min(play.play_events.len())
+        };
+        let m = &play.matchup;
+        let lefty = m.pitch_hand.code == "L";
+        if !pitchers.iter().any(|p| p.id == m.pitcher.id) {
+            pitchers.push(GamePitcher {
+                id: m.pitcher.id,
+                name: m.pitcher.full_name.clone(),
+                home: play.about.is_top_inning,
+                pitches: 0,
+            });
+        }
+        for e in &play.play_events[..shown] {
+            if !e.is_pitch {
+                continue;
+            }
+            if let Some(p) = pitchers.iter_mut().find(|p| p.id == m.pitcher.id) {
+                p.pitches += 1;
+            }
+            let pd = e.pitch_data.as_ref();
+            let br = pd.and_then(|p| p.breaks.as_ref());
+            let (code, name) = e
+                .details
+                .pitch_type
+                .as_ref()
+                .map(|t| (t.code.clone(), t.description.clone()))
+                .unwrap_or_else(|| ("UN".into(), "Unknown".into()));
+            recs.push(PitchRec {
+                pitcher: m.pitcher.id,
+                code,
+                name,
+                inning: play.about.inning,
+                speed: pd.and_then(|p| p.start_speed),
+                spin: br.and_then(|b| b.spin_rate),
+                ivb: br.and_then(|b| b.break_vertical_induced),
+                hb_arm: br
+                    .and_then(|b| b.break_horizontal)
+                    .map(|h| if lefty { -h } else { h }),
+                call: e
+                    .details
+                    .call
+                    .as_ref()
+                    .map(|c| c.code.clone())
+                    .unwrap_or_default(),
+                launch_speed: e.hit_data.as_ref().and_then(|h| h.launch_speed),
+            });
+        }
+    }
+    (recs, pitchers)
+}
+
+/// Swinging strikes and missed bunts.
+pub fn is_whiff(call: &str) -> bool {
+    matches!(call, "S" | "W" | "M")
+}
+
+/// Any swing: whiffs, fouls, foul tips and balls in play.
+pub fn is_swing(call: &str) -> bool {
+    matches!(
+        call,
+        "S" | "W" | "M" | "F" | "T" | "O" | "L" | "R" | "X" | "D" | "E"
+    )
+}
+
+/// Called strikes plus whiffs (CSW).
+pub fn is_csw(call: &str) -> bool {
+    call == "C" || is_whiff(call)
+}
+
 /// Last name for compact displays.
 pub fn last_name(feed: &GameFeed, id: u64, fallback: &str) -> String {
     feed.game_data
@@ -962,6 +1066,29 @@ mod tests {
             pitch("C", 1, 2)
         ));
         assert_eq!(notation(&k), "KL");
+    }
+
+    #[test]
+    fn swing_and_whiff_codes() {
+        assert!(is_whiff("S") && is_swing("S") && is_csw("S"));
+        assert!(is_csw("C") && !is_swing("C"));
+        assert!(is_swing("F") && !is_whiff("F") && !is_csw("F"));
+        assert!(!is_swing("B") && !is_csw("*B"));
+    }
+
+    #[test]
+    fn lefty_break_flipped_to_arm_side() {
+        let p = play(
+            r#"{"about":{"inning":1,"isTopInning":true,"isComplete":true},
+                "matchup":{"pitcher":{"id":7},"pitchHand":{"code":"L"},"batter":{"id":1}},
+                "playEvents":[{"isPitch":true,"type":"pitch",
+                  "details":{"call":{"code":"S"},"type":{"code":"FF","description":"Four-Seam Fastball"}},
+                  "pitchData":{"startSpeed":94.0,"breaks":{"breakHorizontal":-8.0,"breakVerticalInduced":16.0}}}]}"#,
+        );
+        let (recs, who) = pitches(&[p], Cursor { play: 0, events: 1 });
+        assert_eq!(recs[0].hb_arm, Some(8.0));
+        assert_eq!(who[0].pitches, 1);
+        assert!(who[0].home);
     }
 
     #[test]

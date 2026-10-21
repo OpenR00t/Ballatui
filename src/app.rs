@@ -5,7 +5,9 @@
 
 use crate::api::Api;
 use crate::config::Config;
-use crate::game::{BattedBall, Cursor, LogLine, batted_balls, play_log};
+use crate::game::{
+    BattedBall, Cursor, GamePitcher, LogLine, PitchRec, batted_balls, pitches, play_log,
+};
 use crate::model::{GameFeed, ScheduleGame, Standings};
 use crate::stats::{ArsenalPitch, League, Load, PlayerStats, Stat, StatsCache};
 use anyhow::Result;
@@ -55,6 +57,7 @@ impl StandingsKind {
 pub enum GameTab {
     Gamecast,
     Matchup,
+    Pitches,
     Spray,
     Box,
     Scorecard,
@@ -62,9 +65,10 @@ pub enum GameTab {
 }
 
 impl GameTab {
-    pub const ALL: [GameTab; 6] = [
+    pub const ALL: [GameTab; 7] = [
         Self::Gamecast,
         Self::Matchup,
+        Self::Pitches,
         Self::Spray,
         Self::Box,
         Self::Scorecard,
@@ -74,6 +78,7 @@ impl GameTab {
         match self {
             Self::Gamecast => "Gamecast",
             Self::Matchup => "Matchup",
+            Self::Pitches => "Pitches",
             Self::Spray => "Spray",
             Self::Box => "Box score",
             Self::Scorecard => "Scorecard",
@@ -84,6 +89,7 @@ impl GameTab {
         match self {
             Self::Gamecast => 'c',
             Self::Matchup => 'm',
+            Self::Pitches => 'i',
             Self::Spray => 'y',
             Self::Box => 'b',
             Self::Scorecard => 's',
@@ -142,6 +148,8 @@ pub struct GameView {
     pub spray_team: SprayTeam,
     /// Only the batter at the shown moment.
     pub spray_batter_only: bool,
+    /// Pitcher picked on the pitches tab; `None` follows whoever is pitching.
+    pub pitch_sel: Option<u64>,
 }
 
 impl GameView {
@@ -167,6 +175,7 @@ impl GameView {
             spray_sel: usize::MAX,
             spray_team: SprayTeam::Both,
             spray_batter_only: false,
+            pitch_sel: None,
         }
     }
 
@@ -221,6 +230,38 @@ impl GameView {
             })
             .filter(|b| !self.spray_batter_only || Some(b.batter) == batter)
             .collect()
+    }
+
+    /// The pitcher at the shown moment.
+    pub fn current_pitcher(&self) -> Option<u64> {
+        let c = self.at()?;
+        self.plays().get(c.play).map(|p| p.matchup.pitcher.id)
+    }
+
+    /// The pitcher shown on the pitches tab.
+    pub fn shown_pitcher(&self) -> Option<u64> {
+        self.pitch_sel.or_else(|| self.current_pitcher())
+    }
+
+    /// Pitches and pitchers up to the shown moment.
+    pub fn pitch_data(&self) -> (Vec<PitchRec>, Vec<GamePitcher>) {
+        match self.at() {
+            Some(c) => pitches(self.plays(), c),
+            None => (Vec::new(), Vec::new()),
+        }
+    }
+
+    /// Steps the pitches tab's pick through the pitchers, away team first.
+    fn move_pitcher(&mut self, d: i32) {
+        let (_, mut list) = self.pitch_data();
+        list.sort_by_key(|p| p.home);
+        if list.is_empty() {
+            return;
+        }
+        let cur = self.shown_pitcher();
+        let i = list.iter().position(|p| Some(p.id) == cur).unwrap_or(0);
+        let j = add_usize(i, d, list.len());
+        self.pitch_sel = Some(list[j].id);
     }
 
     /// The selectable list on the current tab, if it has one.
@@ -608,7 +649,17 @@ impl App {
                 let _ = tx.send(Msg::Players(missing, season, r));
             });
         }
-        if p != 0 && !self.stats.arsenal.contains_key(&(p, season)) {
+        let mut arsenal_for = vec![p];
+        if g.tab == GameTab::Pitches
+            && let Some(sp) = g.shown_pitcher()
+            && sp != p
+        {
+            arsenal_for.push(sp);
+        }
+        for p in arsenal_for {
+            if p == 0 || self.stats.arsenal.contains_key(&(p, season)) {
+                continue;
+            }
             self.stats.arsenal.insert((p, season), Load::Loading);
             let (tx, api) = (self.tx.clone(), self.api.clone());
             thread::spawn(move || {
@@ -915,6 +966,13 @@ impl App {
             KeyCode::Char('-') | KeyCode::Char('_') => {
                 g.replay.speed_idx = g.replay.speed_idx.saturating_sub(1);
                 flash = Some(format!("Replay speed {}x", SPEEDS[g.replay.speed_idx]));
+            }
+            // Pitches tab: pick a pitcher, `a` back to whoever is pitching.
+            KeyCode::Char('j') | KeyCode::Down if g.tab == GameTab::Pitches => g.move_pitcher(1),
+            KeyCode::Char('k') | KeyCode::Up if g.tab == GameTab::Pitches => g.move_pitcher(-1),
+            KeyCode::Char('a') if g.tab == GameTab::Pitches => {
+                g.pitch_sel = None;
+                flash = Some("Following the current pitcher".into());
             }
             // Scrolling.
             KeyCode::Char('j') | KeyCode::Down => {

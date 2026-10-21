@@ -24,6 +24,12 @@ Stats API, in a Gruvbox dark look.
   mix next to today's, and their career head-to-head. Advanced figures are
   the API's own sabermetrics and Statcast expected stats; league averages
   come from that season's team totals.
+- **Pitches**: any pitcher's game by pitch type: count and share, average
+  and top velocity against his season average, spin, induced vertical and
+  horizontal break (arm side positive for both hands), CSW%, whiff% and exit
+  velocity allowed; velocity by inning for his two main pitches; and a
+  movement chart. Follows whoever is pitching, or pick any pitcher who has
+  appeared.
 - **Spray chart**: every ball in play so far drawn on the park, using that
   venue's real fence distances, colored by result, with a list of exit
   velocity, launch angle, distance and type. Hard-hit balls and Statcast
@@ -64,9 +70,10 @@ Press `?` in the app for the full list.
 |---|---|
 | Everywhere | `1` scores · `2` standings · `3` open game · `?` help · `q` quit |
 | Scores | `j`/`k` pick · `h`/`l` day · `H`/`L` week · `[`/`]` previous/next day with games · `t` today · `Enter` open · `r` refresh |
-| Game | `c` `m` `y` `b` `s` `p` gamecast · matchup · spray · box · scorecard · plays (or `Tab`) |
+| Game | `c` `m` `i` `y` `b` `s` `p` gamecast · matchup · pitches · spray · box · scorecard · plays (or `Tab`) |
 | | `h`/`l` one pitch back/forward · `[`/`]` previous/next at-bat · `0` first pitch · `f` back to live (or the end) |
 | | `Space` replay/pause · `R` replay from the first pitch · `+`/`-` speed |
+| | Pitches: `j`/`k` pick a pitcher · `a` follow whoever is pitching |
 | | Spray: `t` both/away/home · `a` only the batter now up · `j`/`k` pick · `Enter` jump to the play |
 | | `t` away/home team · `j`/`k`, `Ctrl-d`/`Ctrl-u` scroll · `<`/`>` scroll the scorecard sideways · `Esc` back |
 | Standings | `w` divisions ↔ wild card · `j`/`k` scroll |

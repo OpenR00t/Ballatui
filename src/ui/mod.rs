@@ -8,6 +8,7 @@ mod boxscore;
 mod gamecast;
 mod gameview;
 mod matchup;
+mod pitches;
 mod plays;
 mod scoreboard;
 mod scorecard;
@@ -100,7 +101,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             ("q", "quit"),
         ],
         Screen::Game => &[
-            ("c m y b s p", "tabs"),
+            ("c m i y b s p", "tabs"),
             ("h/l", "pitch"),
             ("[ ]", "at-bat"),
             ("␣", "replay"),
@@ -162,7 +163,8 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
                 ("R", "replay from the first pitch"),
                 ("+ -", "replay speed"),
                 ("t", "team: box, scorecard · spray: both/away/home"),
-                ("a", "spray: only the batter now up"),
+                ("a", "spray: batter now up · pitches: follow the pitcher"),
+                ("j k", "pitches: pick a pitcher"),
                 ("j k  Ctrl-d/u", "scroll · in Plays, ⏎ jumps to that play"),
                 ("< >", "scroll the scorecard sideways"),
                 ("r  esc", "refresh · back"),
