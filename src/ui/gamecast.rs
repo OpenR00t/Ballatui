@@ -7,6 +7,7 @@ use super::gameview::Ctx;
 use super::{ordinal, pad, panel, rpad};
 use crate::game::{PitcherTally, hits_for, last_name};
 use crate::model::{GameFeed, Play};
+use crate::stats::{num, slash, text};
 use crate::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -214,11 +215,25 @@ fn draw_situation(f: &mut Frame, ctx: &Ctx, area: Rect) {
             Span::styled(m.pitcher.full_name.clone(), theme::title()),
             Span::styled(format!(" ({}HP)", m.pitch_hand.code), theme::meta()),
         ]));
-        let era = pitching_box
-            .player(m.pitcher.id)
-            .and_then(|p| p.season_stats.pitching.era.clone())
-            .map(|e| format!(" · {e} ERA"))
-            .unwrap_or_default();
+        // Regular-season ERA and FIP once loaded (the box score's "season"
+        // numbers are postseason-only in October).
+        let era = match ctx.stats.player(m.pitcher.id, ctx.season) {
+            Some(ps) if !ps.pitching.is_empty() => {
+                let mut s = String::new();
+                if let Some(e) = text(&ps.pitching.season, "era") {
+                    s.push_str(&format!(" · {e} ERA"));
+                }
+                if let Some(fip) = num(&ps.pitching.saber, "fip") {
+                    s.push_str(&format!(" {fip:.2} FIP"));
+                }
+                s
+            }
+            _ => pitching_box
+                .player(m.pitcher.id)
+                .and_then(|p| p.season_stats.pitching.era.clone())
+                .map(|e| format!(" · {e} ERA"))
+                .unwrap_or_default(),
+        };
         lines.push(Line::from(vec![
             Span::raw("    "),
             Span::styled(
@@ -236,7 +251,7 @@ fn draw_situation(f: &mut Frame, ctx: &Ctx, area: Rect) {
         lines.push(Line::from(vec![
             Span::raw("    "),
             Span::styled(
-                format!("{} pitches, {} strikes", t.pitches, t.strikes),
+                format!("{} P, {} S", t.pitches, t.strikes),
                 theme::secondary(),
             ),
             Span::styled(era, theme::meta()),
@@ -267,7 +282,18 @@ fn draw_situation(f: &mut Frame, ctx: &Ctx, area: Rect) {
             Span::raw("    "),
             Span::styled(today, theme::text()),
         ]));
-        if let Some(bs) = batting_box
+        if let Some(ps) = ctx.stats.player(m.batter.id, ctx.season)
+            && let Some(sl) = slash(&ps.hitting.season)
+        {
+            let mut t = sl;
+            if let Some(w) = num(&ps.hitting.saber, "wRcPlus") {
+                t.push_str(&format!(" · {w:.0} wRC+"));
+            }
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(t, theme::meta()),
+            ]));
+        } else if let Some(bs) = batting_box
             .player(m.batter.id)
             .map(|p| &p.season_stats.batting)
             && let (Some(avg), Some(obp), Some(slg)) = (&bs.avg, &bs.obp, &bs.slg)

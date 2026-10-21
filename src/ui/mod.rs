@@ -7,6 +7,7 @@
 mod boxscore;
 mod gamecast;
 mod gameview;
+mod matchup;
 mod plays;
 mod scoreboard;
 mod scorecard;
@@ -98,7 +99,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             ("q", "quit"),
         ],
         Screen::Game => &[
-            ("c b s p", "tabs"),
+            ("c m b s p", "tabs"),
             ("h/l", "pitch"),
             ("[ ]", "at-bat"),
             ("␣", "replay"),
@@ -147,7 +148,10 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         (
             "Game",
             &[
-                ("c b s p  Tab", "gamecast · box score · scorecard · plays"),
+                (
+                    "c m b s p  Tab",
+                    "gamecast · matchup · box · scorecard · plays",
+                ),
                 ("h l", "step back / forward one pitch"),
                 ("[ ]", "previous / next at-bat"),
                 ("0", "first pitch"),

@@ -7,6 +7,7 @@ use crate::api::Api;
 use crate::config::Config;
 use crate::game::{Cursor, LogLine, play_log};
 use crate::model::{GameFeed, ScheduleGame, Standings};
+use crate::stats::{ArsenalPitch, League, Load, PlayerStats, Stat, StatsCache};
 use anyhow::Result;
 use chrono::{Duration as Days, Local, NaiveDate, Timelike};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
@@ -21,6 +22,10 @@ pub enum Msg {
     Standings(StandingsKind, Result<Standings>),
     /// Nearest day with games, searching forward (`true`) or back.
     GameDay(bool, Result<Option<NaiveDate>>),
+    Players(Vec<u64>, i32, Result<Vec<PlayerStats>>),
+    Arsenal(u64, i32, Result<Vec<ArsenalPitch>>),
+    HeadToHead((u64, u64), Result<Option<Stat>>),
+    League(i32, Result<League>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,16 +53,24 @@ impl StandingsKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameTab {
     Gamecast,
+    Matchup,
     Box,
     Scorecard,
     Plays,
 }
 
 impl GameTab {
-    pub const ALL: [GameTab; 4] = [Self::Gamecast, Self::Box, Self::Scorecard, Self::Plays];
+    pub const ALL: [GameTab; 5] = [
+        Self::Gamecast,
+        Self::Matchup,
+        Self::Box,
+        Self::Scorecard,
+        Self::Plays,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Gamecast => "Gamecast",
+            Self::Matchup => "Matchup",
             Self::Box => "Box score",
             Self::Scorecard => "Scorecard",
             Self::Plays => "Plays",
@@ -66,6 +79,7 @@ impl GameTab {
     pub fn key(self) -> char {
         match self {
             Self::Gamecast => 'c',
+            Self::Matchup => 'm',
             Self::Box => 'b',
             Self::Scorecard => 's',
             Self::Plays => 'p',
@@ -188,6 +202,7 @@ pub struct App {
     standings_loading: bool,
     pub standings_scroll: u16,
     pub game: Option<GameView>,
+    pub stats: StatsCache,
     pub help: bool,
     pub quit: bool,
     pending_g: bool,
@@ -228,6 +243,7 @@ impl App {
             standings_loading: false,
             standings_scroll: 0,
             game: None,
+            stats: StatsCache::default(),
             help: false,
             quit: false,
             pending_g: false,
@@ -366,6 +382,51 @@ impl App {
                     )),
                     Err(e) => self.flash(format!("Search failed: {e:#}")),
                 },
+                Msg::Players(ids, season, r) => match r {
+                    Ok(list) => {
+                        for id in &ids {
+                            self.stats.players.remove(&(*id, season));
+                        }
+                        for p in list {
+                            self.stats.players.insert((p.id, season), Load::Ready(p));
+                        }
+                        // Players the API returned nothing for.
+                        for id in ids {
+                            self.stats
+                                .players
+                                .entry((id, season))
+                                .or_insert_with(|| Load::Failed("no stats".into()));
+                        }
+                    }
+                    Err(e) => {
+                        for id in ids {
+                            self.stats
+                                .players
+                                .insert((id, season), Load::Failed(format!("{e:#}")));
+                        }
+                    }
+                },
+                Msg::Arsenal(id, season, r) => {
+                    self.stats.arsenal.insert(
+                        (id, season),
+                        r.map(Load::Ready)
+                            .unwrap_or_else(|e| Load::Failed(format!("{e:#}"))),
+                    );
+                }
+                Msg::HeadToHead(key, r) => {
+                    self.stats.head_to_head.insert(
+                        key,
+                        r.map(Load::Ready)
+                            .unwrap_or_else(|e| Load::Failed(format!("{e:#}"))),
+                    );
+                }
+                Msg::League(season, r) => {
+                    self.stats.league.insert(
+                        season,
+                        r.map(Load::Ready)
+                            .unwrap_or_else(|e| Load::Failed(format!("{e:#}"))),
+                    );
+                }
                 Msg::Standings(kind, r) => {
                     self.standings_loading = false;
                     self.standings_error = None;
@@ -433,6 +494,61 @@ impl App {
         }
         if want_feed {
             self.fetch_feed();
+        }
+        self.ensure_matchup_stats();
+    }
+
+    /// Fetches stats for the batter and pitcher at the shown moment, once
+    /// each. Used by the matchup tab and the gamecast's stat lines.
+    fn ensure_matchup_stats(&mut self) {
+        if self.screen != Screen::Game {
+            return;
+        }
+        let Some(g) = self.game.as_ref() else { return };
+        let Some(feed) = g.feed.as_ref() else { return };
+        let Some(c) = g.at() else { return };
+        let Some(play) = feed.live_data.plays.all_plays.get(c.play) else {
+            return;
+        };
+        let season: i32 = feed.game_data.game.season.parse().unwrap_or(0);
+        if season == 0 {
+            return;
+        }
+        let (b, p) = (play.matchup.batter.id, play.matchup.pitcher.id);
+        let missing: Vec<u64> = [b, p]
+            .into_iter()
+            .filter(|id| *id != 0 && !self.stats.players.contains_key(&(*id, season)))
+            .collect();
+        if !missing.is_empty() {
+            for id in &missing {
+                self.stats.players.insert((*id, season), Load::Loading);
+            }
+            let (tx, api) = (self.tx.clone(), self.api.clone());
+            thread::spawn(move || {
+                let r = api.player_stats(&missing, season);
+                let _ = tx.send(Msg::Players(missing, season, r));
+            });
+        }
+        if p != 0 && !self.stats.arsenal.contains_key(&(p, season)) {
+            self.stats.arsenal.insert((p, season), Load::Loading);
+            let (tx, api) = (self.tx.clone(), self.api.clone());
+            thread::spawn(move || {
+                let _ = tx.send(Msg::Arsenal(p, season, api.arsenal(p, season)));
+            });
+        }
+        if b != 0 && p != 0 && !self.stats.head_to_head.contains_key(&(b, p)) {
+            self.stats.head_to_head.insert((b, p), Load::Loading);
+            let (tx, api) = (self.tx.clone(), self.api.clone());
+            thread::spawn(move || {
+                let _ = tx.send(Msg::HeadToHead((b, p), api.head_to_head(b, p)));
+            });
+        }
+        if let std::collections::hash_map::Entry::Vacant(e) = self.stats.league.entry(season) {
+            e.insert(Load::Loading);
+            let (tx, api) = (self.tx.clone(), self.api.clone());
+            thread::spawn(move || {
+                let _ = tx.send(Msg::League(season, api.league(season)));
+            });
         }
     }
 
@@ -774,6 +890,8 @@ impl App {
         }
         if refresh {
             self.fetch_feed();
+            // Let stats that failed to load try again.
+            self.stats.retry_failed();
         }
     }
 }

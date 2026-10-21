@@ -8,6 +8,7 @@ mod app;
 mod config;
 mod game;
 mod model;
+mod stats;
 mod theme;
 mod ui;
 

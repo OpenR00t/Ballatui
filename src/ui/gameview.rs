@@ -4,7 +4,7 @@
 //! The game screen frame: header, linescore and tab bar around the four
 //! game tabs.
 
-use super::{boxscore, gamecast, message, ordinal, pad, panel, plays, rpad, scorecard};
+use super::{boxscore, gamecast, matchup, message, ordinal, pad, panel, plays, rpad, scorecard};
 use crate::app::{App, GameTab, GameView, SPEEDS};
 use crate::game::{Cursor, Situation, total_steps};
 use crate::model::GameFeed;
@@ -28,10 +28,14 @@ pub struct Ctx<'a> {
     /// Showing the latest state (not history or a replay).
     pub at_end: bool,
     pub favorites: &'a [String],
+    pub stats: &'a crate::stats::StatsCache,
+    /// Season of the game, for stat lookups.
+    pub season: i32,
 }
 
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let favorites = app.cfg.favorites.clone();
+    let stats = &app.stats;
     let Some(g) = app.game.as_mut() else { return };
     let Some(feed) = g.feed.as_ref() else {
         let (text, style) = match &g.error {
@@ -51,6 +55,8 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         sit,
         at_end: g.following(),
         favorites: &favorites,
+        stats,
+        season: feed.game_data.game.season.parse().unwrap_or(0),
     };
 
     let [head, line, tabs, body] = Layout::vertical([
@@ -65,6 +71,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     draw_tab_bar(f, g.tab, tabs);
     match g.tab {
         GameTab::Gamecast => gamecast::draw(f, &ctx, g.scroll, body),
+        GameTab::Matchup => matchup::draw(f, &ctx, body),
         GameTab::Box => boxscore::draw(f, &ctx, g.home_side, g.scroll, body),
         GameTab::Scorecard => scorecard::draw(f, &ctx, g.home_side, g.scroll, g.hscroll, body),
         GameTab::Plays => {

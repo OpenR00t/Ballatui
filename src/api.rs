@@ -4,6 +4,10 @@
 //! Blocking client for the public MLB Stats API.
 
 use crate::model::{GameFeed, Schedule, Standings};
+use crate::stats::{
+    ArsenalPitch, League, People, PlayerStats, Stat, StatsResponse, arsenal_from,
+    head_to_head_from, league_from,
+};
 use anyhow::{Context, Result};
 use std::time::Duration;
 
@@ -67,6 +71,44 @@ impl Api {
 
     pub fn feed(&self, game_pk: u64) -> Result<GameFeed> {
         self.get(&format!("/api/v1.1/game/{game_pk}/feed/live"))
+    }
+
+    /// Season, advanced, expected and platoon stats for several players in
+    /// one request.
+    pub fn player_stats(&self, ids: &[u64], season: i32) -> Result<Vec<PlayerStats>> {
+        let ids: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+        let people: People = self.get(&format!(
+            "/api/v1/people?personIds={}&hydrate=stats(group=[hitting,pitching],\
+             type=[season,sabermetrics,expectedStatistics,statSplits],sitCodes=[vl,vr],\
+             season={season},gameType=R)",
+            ids.join(",")
+        ))?;
+        Ok(people.people.iter().map(PlayerStats::from_person).collect())
+    }
+
+    pub fn arsenal(&self, pitcher: u64, season: i32) -> Result<Vec<ArsenalPitch>> {
+        let r: StatsResponse = self.get(&format!(
+            "/api/v1/people/{pitcher}/stats?stats=pitchArsenal&group=pitching&season={season}"
+        ))?;
+        Ok(arsenal_from(&r))
+    }
+
+    pub fn head_to_head(&self, batter: u64, pitcher: u64) -> Result<Option<Stat>> {
+        let r: StatsResponse = self.get(&format!(
+            "/api/v1/people/{batter}/stats?stats=vsPlayer&opposingPlayerId={pitcher}&group=hitting"
+        ))?;
+        Ok(head_to_head_from(&r))
+    }
+
+    pub fn league(&self, season: i32) -> Result<League> {
+        let path = |g: &str| {
+            format!(
+                "/api/v1/teams/stats?stats=season&group={g}&season={season}&sportIds=1&gameType=R"
+            )
+        };
+        let h: StatsResponse = self.get(&path("hitting"))?;
+        let p: StatsResponse = self.get(&path("pitching"))?;
+        Ok(league_from(&h, &p))
     }
 
     pub fn standings(&self, season: i32, kind: &str) -> Result<Standings> {

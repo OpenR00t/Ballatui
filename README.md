@@ -17,6 +17,13 @@ Stats API, in a Gruvbox dark look.
 - **History and replay**: step through any game one pitch or one at-bat at a
   time, or replay it from the first pitch at 0.5x to 10x. Score, bases,
   outs, linescore, scorecard and play log all rewind with it.
+- **Matchup**: the batter and pitcher at the shown moment side by side:
+  season lines, wOBA, xwOBA, wRC+, ISO, K%, BB%, BABIP, FIP, xFIP, K-BB%
+  and WAR on bars against the league average, platoon splits (with the one
+  that applies marked, switch hitters included), the pitcher's season pitch
+  mix next to today's, and their career head-to-head. Advanced figures are
+  the API's own sabermetrics and Statcast expected stats; league averages
+  come from that season's team totals.
 - **Box score**: batting and pitching lines, batting/fielding notes and game
   info.
 - **Scorecard**: a scorebook page per team, with notation such as `6-4-3 DP`,
@@ -52,7 +59,7 @@ Press `?` in the app for the full list.
 |---|---|
 | Everywhere | `1` scores · `2` standings · `3` open game · `?` help · `q` quit |
 | Scores | `j`/`k` pick · `h`/`l` day · `H`/`L` week · `[`/`]` previous/next day with games · `t` today · `Enter` open · `r` refresh |
-| Game | `c` `b` `s` `p` gamecast · box · scorecard · plays (or `Tab`) |
+| Game | `c` `m` `b` `s` `p` gamecast · matchup · box · scorecard · plays (or `Tab`) |
 | | `h`/`l` one pitch back/forward · `[`/`]` previous/next at-bat · `0` first pitch · `f` back to live (or the end) |
 | | `Space` replay/pause · `R` replay from the first pitch · `+`/`-` speed |
 | | `t` away/home team · `j`/`k`, `Ctrl-d`/`Ctrl-u` scroll · `<`/`>` scroll the scorecard sideways · `Esc` back |
