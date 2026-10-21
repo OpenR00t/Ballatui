@@ -391,6 +391,8 @@ pub struct Credit {
 pub struct Position {
     pub code: String,
     pub abbreviation: String,
+    #[serde(rename = "type")]
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

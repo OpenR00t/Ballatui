@@ -10,6 +10,7 @@ use crate::game::{
 };
 use crate::model::{GameFeed, ScheduleGame, Standings, WpPoint};
 use crate::stats::{ArsenalPitch, League, Load, PlayerStats, Stat, StatsCache};
+use crate::team::TeamPage;
 use anyhow::Result;
 use chrono::{Duration as Days, Local, NaiveDate, Timelike};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
@@ -25,6 +26,8 @@ pub enum Msg {
     Standings(StandingsKind, Result<Standings>),
     /// Nearest day with games, searching forward (`true`) or back.
     GameDay(bool, Result<Option<NaiveDate>>),
+    Teams(Result<Vec<crate::model::TeamInfo>>),
+    TeamPage(u64, Box<Result<TeamPage>>),
     Players(Vec<u64>, i32, Result<Vec<PlayerStats>>),
     Arsenal(u64, i32, Result<Vec<ArsenalPitch>>),
     HeadToHead((u64, u64), Result<Option<Stat>>),
@@ -37,6 +40,13 @@ pub enum Screen {
     Scoreboard,
     Standings,
     Game,
+    Team,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeamTab {
+    Overview,
+    Roster,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -377,6 +387,17 @@ pub struct App {
     pub standings_scroll: u16,
     pub game: Option<GameView>,
     pub stats: StatsCache,
+    /// All teams, for the team picker and favorites.
+    pub teams: Option<Vec<crate::model::TeamInfo>>,
+    teams_loading: bool,
+    pub team_id: Option<u64>,
+    pub team_pages: HashMap<u64, Load<TeamPage>>,
+    pub team_tab: TeamTab,
+    /// Selected game in the team schedule; `usize::MAX` = pick a default.
+    pub team_sel: usize,
+    pub team_scroll: u16,
+    /// Team picker popup, with its selected row.
+    pub picker: Option<usize>,
     pub help: bool,
     pub quit: bool,
     pending_g: bool,
@@ -418,6 +439,14 @@ impl App {
             standings_scroll: 0,
             game: None,
             stats: StatsCache::default(),
+            teams: None,
+            teams_loading: false,
+            team_id: None,
+            team_pages: HashMap::new(),
+            team_tab: TeamTab::Overview,
+            team_sel: usize::MAX,
+            team_scroll: 0,
+            picker: None,
             help: false,
             quit: false,
             pending_g: false,
@@ -563,6 +592,25 @@ impl App {
                         Err(e) => g.wp_error = Some(format!("{e:#}")),
                     }
                 }
+                Msg::Teams(r) => {
+                    self.teams_loading = false;
+                    match r {
+                        Ok(mut t) => {
+                            t.sort_by(|a, b| a.name.cmp(&b.name));
+                            self.teams = Some(t);
+                        }
+                        Err(e) => self.flash(format!("Couldn't load teams: {e:#}")),
+                    }
+                }
+                Msg::TeamPage(id, r) => {
+                    self.team_pages.insert(
+                        id,
+                        match *r {
+                            Ok(p) => Load::Ready(p),
+                            Err(e) => Load::Failed(format!("{e:#}")),
+                        },
+                    );
+                }
                 Msg::GameDay(forward, r) => match r {
                     Ok(Some(d)) => {
                         self.date = d;
@@ -695,6 +743,7 @@ impl App {
             self.fetch_feed();
         }
         self.ensure_win_prob();
+        self.ensure_team();
         self.ensure_matchup_stats();
     }
 
@@ -817,6 +866,20 @@ impl App {
             Screen::Standings => {
                 self.standings_scroll = add(self.standings_scroll, delta);
             }
+            Screen::Team => {
+                if let Some(sel) = self.picker {
+                    let n = self.teams.as_ref().map_or(0, |t| t.len());
+                    self.picker = Some(add_usize(sel, delta.signum(), n));
+                } else if self.team_tab == TeamTab::Roster {
+                    self.team_scroll = add(self.team_scroll, delta);
+                } else {
+                    let n = self.team_games().len();
+                    if self.team_sel == usize::MAX {
+                        self.team_sel = self.team_default_sel();
+                    }
+                    self.team_sel = add_usize(self.team_sel, delta.signum(), n);
+                }
+            }
             Screen::Game => {
                 if let Some(g) = self.game.as_mut() {
                     if let Some((sel, len)) = g.list_sel() {
@@ -877,6 +940,11 @@ impl App {
             return;
         }
         let gg = std::mem::take(&mut self.pending_g);
+        // The team picker takes every key while it's open.
+        if self.screen == Screen::Team && self.picker.is_some() {
+            self.key_team(k, gg, ctrl);
+            return;
+        }
         match k.code {
             KeyCode::Char('?') => {
                 self.help = true;
@@ -893,8 +961,12 @@ impl App {
                 }
                 return;
             }
-            KeyCode::Char('3') if self.game.is_some() => {
+            KeyCode::Char('3') if self.game.is_some() && self.picker.is_none() => {
                 self.screen = Screen::Game;
+                return;
+            }
+            KeyCode::Char('4') if self.picker.is_none() => {
+                self.open_team_screen();
                 return;
             }
             _ => {}
@@ -902,6 +974,7 @@ impl App {
         match self.screen {
             Screen::Scoreboard => self.key_scoreboard(k, gg),
             Screen::Standings => self.key_standings(k, gg, ctrl),
+            Screen::Team => self.key_team(k, gg, ctrl),
             Screen::Game => self.key_game(k, gg, ctrl),
         }
     }
@@ -933,6 +1006,206 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char('o') => {
                 if let Some(pk) = self.selected_game().map(|g| g.game_pk) {
+                    self.open_game(pk);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Season the team pages are about: last year's until spring training.
+    pub fn team_season(&self) -> i32 {
+        let y: i32 = self.date.format("%Y").to_string().parse().unwrap_or(2026);
+        let m: u32 = self.date.format("%m").to_string().parse().unwrap_or(6);
+        if m < 3 { y - 1 } else { y }
+    }
+
+    fn fetch_teams(&mut self) {
+        if self.teams.is_some() || self.teams_loading {
+            return;
+        }
+        self.teams_loading = true;
+        let (tx, api, season) = (self.tx.clone(), self.api.clone(), self.team_season());
+        thread::spawn(move || {
+            let _ = tx.send(Msg::Teams(api.teams(season)));
+        });
+    }
+
+    fn fetch_team_page(&mut self, id: u64) {
+        if matches!(self.team_pages.get(&id), Some(Load::Loading)) {
+            return;
+        }
+        self.team_pages.insert(id, Load::Loading);
+        let season = self.team_season();
+        let from = (self.date - Days::days(45)).format("%Y-%m-%d").to_string();
+        let to = (self.date + Days::days(45)).format("%Y-%m-%d").to_string();
+        let (tx, api) = (self.tx.clone(), self.api.clone());
+        thread::spawn(move || {
+            let r = api.team_page(id, season, &from, &to);
+            let _ = tx.send(Msg::TeamPage(id, Box::new(r)));
+        });
+    }
+
+    fn open_team_screen(&mut self) {
+        self.screen = Screen::Team;
+        self.fetch_teams();
+        if !self.standings.contains_key(&StandingsKind::Division) {
+            let keep = self.standings_kind;
+            self.standings_kind = StandingsKind::Division;
+            self.fetch_standings();
+            self.standings_kind = keep;
+        }
+    }
+
+    pub fn team_by_abbr(&self, abbr: &str) -> Option<u64> {
+        self.teams
+            .as_ref()?
+            .iter()
+            .find(|t| t.abbreviation == abbr)
+            .map(|t| t.id)
+    }
+
+    fn set_team(&mut self, id: u64) {
+        self.team_id = Some(id);
+        self.team_sel = usize::MAX;
+        self.team_scroll = 0;
+        if !matches!(self.team_pages.get(&id), Some(Load::Ready(_))) {
+            self.fetch_team_page(id);
+        }
+    }
+
+    /// Picks the first team to show once the team list is in.
+    fn ensure_team(&mut self) {
+        if self.screen != Screen::Team || self.team_id.is_some() || self.picker.is_some() {
+            return;
+        }
+        let Some(teams) = self.teams.as_ref() else {
+            return;
+        };
+        let fav = self
+            .cfg
+            .favorites
+            .iter()
+            .find_map(|f| teams.iter().find(|t| &t.abbreviation == f).map(|t| t.id));
+        match fav {
+            Some(id) => self.set_team(id),
+            None => self.picker = Some(0),
+        }
+    }
+
+    /// Games in the team page's schedule window, oldest first.
+    pub fn team_games(&self) -> Vec<&ScheduleGame> {
+        let Some(id) = self.team_id else {
+            return Vec::new();
+        };
+        match self.team_pages.get(&id) {
+            Some(Load::Ready(p)) => p.games.iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Default selection: the next game not yet final, else the last one.
+    pub fn team_default_sel(&self) -> usize {
+        let games = self.team_games();
+        games
+            .iter()
+            .position(|g| !g.status.is_final())
+            .unwrap_or(games.len().saturating_sub(1))
+    }
+
+    fn key_team(&mut self, k: KeyEvent, gg: bool, ctrl: bool) {
+        // Team picker popup.
+        if let Some(sel) = self.picker {
+            let n = self.teams.as_ref().map_or(0, |t| t.len());
+            match k.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.picker = None,
+                KeyCode::Char('j') | KeyCode::Down => self.picker = Some(add_usize(sel, 1, n)),
+                KeyCode::Char('k') | KeyCode::Up => self.picker = Some(add_usize(sel, -1, n)),
+                KeyCode::Char('g') if gg => self.picker = Some(0),
+                KeyCode::Char('g') => self.pending_g = true,
+                KeyCode::Char('G') => self.picker = Some(n.saturating_sub(1)),
+                KeyCode::Enter => {
+                    if let Some(id) = self.teams.as_ref().and_then(|t| t.get(sel)).map(|t| t.id) {
+                        self.picker = None;
+                        self.set_team(id);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        let n_games = self.team_games().len();
+        if self.team_sel == usize::MAX {
+            self.team_sel = self.team_default_sel();
+        }
+        match k.code {
+            KeyCode::Char('q') => self.quit = true,
+            KeyCode::Esc => self.screen = Screen::Scoreboard,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.team_tab = match self.team_tab {
+                    TeamTab::Overview => TeamTab::Roster,
+                    TeamTab::Roster => TeamTab::Overview,
+                };
+                self.team_scroll = 0;
+            }
+            KeyCode::Char('o') => self.team_tab = TeamTab::Overview,
+            KeyCode::Char('R') => {
+                self.team_tab = TeamTab::Roster;
+                self.team_scroll = 0;
+            }
+            KeyCode::Char('t') | KeyCode::Char('/') => {
+                let cur = self
+                    .team_id
+                    .and_then(|id| self.teams.as_ref()?.iter().position(|t| t.id == id))
+                    .unwrap_or(0);
+                self.picker = Some(cur);
+            }
+            KeyCode::Char('f') => {
+                // Next favorite.
+                let favs: Vec<u64> = self
+                    .cfg
+                    .favorites
+                    .clone()
+                    .iter()
+                    .filter_map(|f| self.team_by_abbr(f))
+                    .collect();
+                if !favs.is_empty() {
+                    let i = self
+                        .team_id
+                        .and_then(|id| favs.iter().position(|f| *f == id))
+                        .map(|i| (i + 1) % favs.len())
+                        .unwrap_or(0);
+                    self.set_team(favs[i]);
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(id) = self.team_id {
+                    self.fetch_team_page(id);
+                    self.flash("Refreshing team");
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => match self.team_tab {
+                TeamTab::Overview => self.team_sel = add_usize(self.team_sel, 1, n_games),
+                TeamTab::Roster => self.team_scroll = add(self.team_scroll, 1),
+            },
+            KeyCode::Char('k') | KeyCode::Up => match self.team_tab {
+                TeamTab::Overview => self.team_sel = add_usize(self.team_sel, -1, n_games),
+                TeamTab::Roster => self.team_scroll = add(self.team_scroll, -1),
+            },
+            KeyCode::Char('d') if ctrl => self.team_scroll = add(self.team_scroll, 10),
+            KeyCode::Char('u') if ctrl => self.team_scroll = add(self.team_scroll, -10),
+            KeyCode::Char('g') if gg => {
+                self.team_sel = 0;
+                self.team_scroll = 0;
+            }
+            KeyCode::Char('g') => self.pending_g = true,
+            KeyCode::Char('G') => {
+                self.team_sel = n_games.saturating_sub(1);
+                self.team_scroll = u16::MAX / 2;
+            }
+            KeyCode::Enter if self.team_tab == TeamTab::Overview => {
+                let pk = self.team_games().get(self.team_sel).map(|g| g.game_pk);
+                if let Some(pk) = pk {
                     self.open_game(pk);
                 }
             }

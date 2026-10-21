@@ -49,6 +49,11 @@ Stats API, in a Gruvbox dark look.
   to any play.
 - **Standings**: division and wild-card tables with last ten, streak and run
   differential.
+- **Team pages**: record, place, clinch status and postseason result; the
+  schedule 45 days either side of today (open any game from it); team
+  hitting and pitching ranked against every other team; team leaders; and
+  the active roster with regular-season stats. Opens on your first favorite;
+  pick any team.
 
 ## Install
 
@@ -73,7 +78,7 @@ Press `?` in the app for the full list.
 
 | Where | Keys |
 |---|---|
-| Everywhere | `1` scores · `2` standings · `3` open game · `?` help · `q` quit |
+| Everywhere | `1` scores · `2` standings · `3` open game · `4` team · `?` help · `q` quit |
 | Scores | `j`/`k` pick · `h`/`l` day · `H`/`L` week · `[`/`]` previous/next day with games · `t` today · `Enter` open · `r` refresh |
 | Game | `c` `m` `i` `y` `w` `b` `s` `p` gamecast · matchup · pitches · spray · win prob · box · scorecard · plays (or `Tab`) |
 | | `h`/`l` one pitch back/forward · `[`/`]` previous/next at-bat · `0` first pitch · `f` back to live (or the end) |
@@ -83,6 +88,7 @@ Press `?` in the app for the full list.
 | | Spray: `t` both/away/home · `a` only the batter now up · `j`/`k` pick · `Enter` jump to the play |
 | | `t` away/home team · `j`/`k`, `Ctrl-d`/`Ctrl-u` scroll · `<`/`>` scroll the scorecard sideways · `Esc` back |
 | Standings | `w` divisions ↔ wild card · `j`/`k` scroll |
+| Team | `j`/`k` pick a game · `Enter` open it · `o`/`R` overview/roster · `t` pick a team · `f` next favorite · `r` refresh |
 
 The mouse wheel scrolls.
 

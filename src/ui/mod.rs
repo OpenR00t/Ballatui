@@ -14,6 +14,7 @@ mod scoreboard;
 mod scorecard;
 mod spray;
 mod standings;
+mod team;
 mod winprob;
 
 use crate::app::{App, Screen};
@@ -39,6 +40,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Screen::Scoreboard => scoreboard::draw(f, app, body),
         Screen::Standings => standings::draw(f, app, body),
         Screen::Game => gameview::draw(f, app, body),
+        Screen::Team => team::draw(f, app, body),
     }
     draw_status(f, app, bottom);
     if app.help {
@@ -63,6 +65,11 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
     };
     tab("1", "Scores".into(), app.screen == Screen::Scoreboard);
     tab("2", "Standings".into(), app.screen == Screen::Standings);
+    let team_label = app
+        .team_id
+        .and_then(|id| app.teams.as_ref()?.iter().find(|t| t.id == id))
+        .map(|t| format!("Team · {}", t.abbreviation))
+        .unwrap_or_else(|| "Team".into());
     if let Some(g) = &app.game {
         let label = g
             .feed
@@ -76,6 +83,7 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
             .unwrap_or_else(|| "Game".into());
         tab("3", label, app.screen == Screen::Game);
     }
+    tab("4", team_label, app.screen == Screen::Team);
     f.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::new().bg(theme::BG0_H)),
         area,
@@ -100,6 +108,16 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             ("r", "refresh"),
             ("?", "help"),
             ("q", "quit"),
+        ],
+        Screen::Team => &[
+            ("j/k", "game"),
+            ("⏎", "open"),
+            ("o R", "overview/roster"),
+            ("t", "pick team"),
+            ("f", "next favorite"),
+            ("r", "refresh"),
+            ("?", "help"),
+            ("esc", "back"),
         ],
         Screen::Game => &[
             ("c m i y w b s p", "tabs"),
@@ -132,7 +150,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         (
             "Everywhere",
             &[
-                ("1 2 3", "scores · standings · open game"),
+                ("1 2 3 4", "scores · standings · open game · team"),
                 ("?", "this help (any key closes)"),
                 ("q / Ctrl-c", "quit (in a game: back)"),
             ],
@@ -174,6 +192,15 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         (
             "Standings",
             &[("w / Tab", "division ↔ wild card"), ("j k", "scroll")],
+        ),
+        (
+            "Team",
+            &[
+                ("j k  ⏎", "pick a game · open it"),
+                ("o R  Tab", "overview · roster"),
+                ("t /", "pick a team"),
+                ("f", "next favorite"),
+            ],
         ),
     ];
     let mut lines = Vec::new();

@@ -9,6 +9,7 @@ mod config;
 mod game;
 mod model;
 mod stats;
+mod team;
 mod theme;
 mod ui;
 

@@ -69,6 +69,8 @@ pub struct StatSplit {
     pub split: Option<crate::model::CodeDesc>,
     /// Set on the combined line of a player who played for several teams.
     pub num_teams: Option<u32>,
+    /// Set on team-stats rows.
+    pub team: Option<crate::model::IdRef>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -8,6 +8,10 @@ use crate::stats::{
     ArsenalPitch, League, People, PlayerStats, Stat, StatsResponse, arsenal_from,
     head_to_head_from, league_from,
 };
+use crate::team::{
+    LEADER_CATEGORIES, LeadersResponse, RosterResponse, TeamPage, Teams, leaders_from, ranks_from,
+    roster_from,
+};
 use anyhow::{Context, Result};
 use std::time::Duration;
 
@@ -121,6 +125,46 @@ impl Api {
     pub fn venue(&self, id: u64) -> Result<Option<FieldInfo>> {
         let v: Venues = self.get(&format!("/api/v1/venues/{id}?hydrate=fieldInfo"))?;
         Ok(v.venues.into_iter().next().and_then(|v| v.field_info))
+    }
+
+    pub fn teams(&self, season: i32) -> Result<Vec<crate::model::TeamInfo>> {
+        let t: Teams = self.get(&format!("/api/v1/teams?sportId=1&season={season}"))?;
+        Ok(t.teams)
+    }
+
+    /// Schedule around `from`..`to`, roster with stats, leaders and league
+    /// ranks for one team.
+    pub fn team_page(&self, team: u64, season: i32, from: &str, to: &str) -> Result<TeamPage> {
+        let sched: Schedule = self.get(&format!(
+            "/api/v1/schedule?sportId=1&teamId={team}&startDate={from}&endDate={to}\
+             &gameType=S,R,F,D,L,W&hydrate=team,linescore,probablePitcher,decisions,seriesStatus"
+        ))?;
+        let roster: RosterResponse = self.get(&format!(
+            "/api/v1/teams/{team}/roster?rosterType=active&season={season}\
+             &hydrate=person(stats(type=season,group=[hitting,pitching],season={season},gameType=R))"
+        ))?;
+        let cats: Vec<&str> = LEADER_CATEGORIES.iter().map(|c| c.0).collect();
+        let leaders: LeadersResponse = self.get(&format!(
+            "/api/v1/teams/{team}/leaders?leaderCategories={}&season={season}&limit=3&leaderGameTypes=R",
+            cats.join(",")
+        ))?;
+        let path = |g: &str| {
+            format!(
+                "/api/v1/teams/stats?stats=season&group={g}&season={season}&sportIds=1&gameType=R"
+            )
+        };
+        let h: StatsResponse = self.get(&path("hitting"))?;
+        let p: StatsResponse = self.get(&path("pitching"))?;
+        let ranks = ranks_from(team, &h, &p);
+        let (pitching_ranks, hitting_ranks): (Vec<_>, Vec<_>) =
+            ranks.into_iter().partition(|r| r.pitching);
+        Ok(TeamPage {
+            games: sched.dates.into_iter().flat_map(|d| d.games).collect(),
+            roster: roster_from(&roster),
+            leaders: leaders_from(&leaders),
+            hitting_ranks,
+            pitching_ranks,
+        })
     }
 
     pub fn standings(&self, season: i32, kind: &str) -> Result<Standings> {
