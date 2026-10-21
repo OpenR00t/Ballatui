@@ -34,10 +34,13 @@ pub struct Ctx<'a> {
     pub stats: &'a crate::stats::StatsCache,
     /// Season of the game, for stat lookups.
     pub season: i32,
+    /// Show a called third strike as the backwards K.
+    pub backwards_k: bool,
 }
 
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let favorites = app.cfg.favorites.clone();
+    let backwards_k = app.cfg.backwards_k;
     let stats = &app.stats;
     let Some(g) = app.game.as_mut() else { return };
     let Some(feed) = g.feed.as_ref() else {
@@ -60,6 +63,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         favorites: &favorites,
         stats,
         season: feed.game_data.game.season.parse().unwrap_or(0),
+        backwards_k,
     };
 
     let [head, line, tabs, body] = Layout::vertical([

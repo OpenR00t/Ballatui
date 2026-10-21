@@ -84,7 +84,7 @@ pub fn draw(f: &mut Frame, ctx: &Ctx, home: bool, scroll: u16, hscroll: u16, are
         l2.push(Span::styled("│", rule_style));
         for i in 1..=innings as u32 {
             let cells = row.cells.get(&i).map(|v| v.as_slice()).unwrap_or(&[]);
-            let (a, b) = cell_spans(cells);
+            let (a, b) = cell_spans(cells, ctx.backwards_k);
             l1.extend(a);
             l2.extend(b);
             l1.push(Span::styled("│", rule_style));
@@ -122,7 +122,14 @@ pub fn draw(f: &mut Frame, ctx: &Ctx, home: bool, scroll: u16, hscroll: u16, are
         Span::styled("out at 2nd  ", theme::meta()),
         Span::styled("①②③ ", theme::secondary()),
         Span::styled("out number  ", theme::meta()),
-        Span::styled("KL ", theme::text()),
+        Span::styled(
+            if ctx.backwards_k {
+                format!("{BACKWARDS_K} ")
+            } else {
+                "KL ".to_string()
+            },
+            theme::text(),
+        ),
         Span::styled("called third strike  ", theme::meta()),
         Span::styled("AR ", theme::text()),
         Span::styled("automatic runner", theme::meta()),
@@ -199,7 +206,18 @@ fn fit(s: &str, w: usize) -> String {
     }
 }
 
-fn cell_spans(cells: &[PaCell]) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+/// The scorer's backwards K for a called third strike (`KL` in the data).
+pub const BACKWARDS_K: &str = "ꓘ";
+
+/// Notation as shown: `KL` becomes the backwards K when that's on.
+fn shown(notation: &str, backwards_k: bool) -> String {
+    match notation.strip_prefix("KL") {
+        Some(rest) if backwards_k => format!("{BACKWARDS_K}{rest}"),
+        _ => notation.to_string(),
+    }
+}
+
+fn cell_spans(cells: &[PaCell], backwards_k: bool) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
     let w = CELL_W - 1;
     match cells {
         [] => (
@@ -207,14 +225,17 @@ fn cell_spans(cells: &[PaCell]) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             vec![Span::raw(" ".repeat(w))],
         ),
         [c] => (
-            vec![Span::styled(fit(&c.notation, w), kind_style(c.kind))],
+            vec![Span::styled(
+                fit(&shown(&c.notation, backwards_k), w),
+                kind_style(c.kind),
+            )],
             path_spans(c, w),
         ),
         // Batted twice in the inning: both results on the top line.
         many => {
             let top = many
                 .iter()
-                .map(|c| c.notation.as_str())
+                .map(|c| shown(&c.notation, backwards_k))
                 .collect::<Vec<_>>()
                 .join("/");
             (
@@ -222,5 +243,19 @@ fn cell_spans(cells: &[PaCell]) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
                 path_spans(many.last().unwrap(), w),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backwards_k_only_when_on() {
+        assert_eq!(shown("KL", true), "ꓘ");
+        assert_eq!(shown("KL DP", true), "ꓘ DP");
+        assert_eq!(shown("KL", false), "KL");
+        assert_eq!(shown("K", true), "K");
+        assert_eq!(unicode_width::UnicodeWidthStr::width(BACKWARDS_K), 1);
     }
 }

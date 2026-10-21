@@ -26,6 +26,8 @@ pub struct Config {
     /// Hours after midnight that still count as the previous baseball day,
     /// so late West Coast games stay on the scoreboard.
     pub day_rollover_hour: u32,
+    /// Score a called third strike with the backwards K (ꓘ) instead of KL.
+    pub backwards_k: bool,
 }
 
 impl Default for Config {
@@ -37,6 +39,7 @@ impl Default for Config {
             replay_step_seconds: 1.2,
             terminal_title: true,
             day_rollover_hour: 6,
+            backwards_k: true,
         }
     }
 }
@@ -59,6 +62,10 @@ terminal_title = true
 
 # Hours after midnight that still count as the previous day's games.
 day_rollover_hour = 6
+
+# Score a called third strike with the backwards K (ꓘ). Set to false for
+# "KL" if your terminal font shows it oddly.
+backwards_k = true
 "#;
 
 pub fn dirs() -> Option<ProjectDirs> {
@@ -104,5 +111,6 @@ mod tests {
         let cfg: Config = toml::from_str(DEFAULT_FILE).unwrap();
         assert!(cfg.favorites.is_empty());
         assert_eq!(cfg.live_poll_seconds, 10);
+        assert!(cfg.backwards_k);
     }
 }

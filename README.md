@@ -43,7 +43,7 @@ Stats API, in a Gruvbox dark look.
 - **Box score**: batting and pitching lines, batting/fielding notes and game
   info.
 - **Scorecard**: a scorebook page per team, with notation such as `6-4-3 DP`,
-  `F8`, `KL`, `FC 6-4`, `E5`, `SF9`, how far each batter got around the
+  `F8`, `ꓘ` (called third strike; `KL` if you turn it off), `FC 6-4`, `E5`, `SF9`, how far each batter got around the
   bases, out numbers, RBIs, pinch runners and extra-inning automatic runners.
 - **Plays**: the whole game grouped by half-inning; Enter jumps the gamecast
   to any play.
@@ -98,6 +98,7 @@ scoreboard_poll_seconds = 30
 replay_step_seconds = 1.2    # per step at 1x
 terminal_title = true
 day_rollover_hour = 6        # before this hour, "today" is still yesterday's games
+backwards_k = true           # ꓘ for a called third strike; false shows "KL"
 ```
 
 `BALLATUI_API` points the app at another server with the same API (handy
