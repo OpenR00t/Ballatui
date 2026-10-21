@@ -739,3 +739,18 @@ pub fn league_name(id: u64) -> &'static str {
         _ => "League",
     }
 }
+
+// --------------------------------------------------------- win probability
+
+/// Win probability after one plate appearance.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WpPoint {
+    pub at_bat_index: usize,
+    /// Percent, after the play.
+    pub home_team_win_probability: f64,
+    /// Percentage points the play moved it (positive helps the home team).
+    pub home_team_win_probability_added: f64,
+    /// How much the situation mattered going in (1.0 = average).
+    pub leverage_index: Option<f64>,
+}

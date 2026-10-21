@@ -35,6 +35,11 @@ Stats API, in a Gruvbox dark look.
   velocity, launch angle, distance and type. Hard-hit balls and Statcast
   barrels are marked; filter by team or by the batter now up. Ground balls
   are plotted where they were fielded (that is what the data records).
+- **Win probability**: the home team's chance to win after every plate
+  appearance, drawn across the game with inning marks, the eight biggest
+  swings numbered on the line and listed with their leverage, and the
+  current odds; the game header shows them on every tab. Uses MLB's own
+  model and refreshes as plays finish.
 - **Box score**: batting and pitching lines, batting/fielding notes and game
   info.
 - **Scorecard**: a scorebook page per team, with notation such as `6-4-3 DP`,
@@ -70,10 +75,11 @@ Press `?` in the app for the full list.
 |---|---|
 | Everywhere | `1` scores · `2` standings · `3` open game · `?` help · `q` quit |
 | Scores | `j`/`k` pick · `h`/`l` day · `H`/`L` week · `[`/`]` previous/next day with games · `t` today · `Enter` open · `r` refresh |
-| Game | `c` `m` `i` `y` `b` `s` `p` gamecast · matchup · pitches · spray · box · scorecard · plays (or `Tab`) |
+| Game | `c` `m` `i` `y` `w` `b` `s` `p` gamecast · matchup · pitches · spray · win prob · box · scorecard · plays (or `Tab`) |
 | | `h`/`l` one pitch back/forward · `[`/`]` previous/next at-bat · `0` first pitch · `f` back to live (or the end) |
 | | `Space` replay/pause · `R` replay from the first pitch · `+`/`-` speed |
 | | Pitches: `j`/`k` pick a pitcher · `a` follow whoever is pitching |
+| | Win prob: `j`/`k` pick a swing · `Enter` jump to the play |
 | | Spray: `t` both/away/home · `a` only the batter now up · `j`/`k` pick · `Enter` jump to the play |
 | | `t` away/home team · `j`/`k`, `Ctrl-d`/`Ctrl-u` scroll · `<`/`>` scroll the scorecard sideways · `Esc` back |
 | Standings | `w` divisions ↔ wild card · `j`/`k` scroll |

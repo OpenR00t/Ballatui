@@ -14,6 +14,7 @@ mod scoreboard;
 mod scorecard;
 mod spray;
 mod standings;
+mod winprob;
 
 use crate::app::{App, Screen};
 use crate::theme;
@@ -101,7 +102,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             ("q", "quit"),
         ],
         Screen::Game => &[
-            ("c m i y b s p", "tabs"),
+            ("c m i y w b s p", "tabs"),
             ("h/l", "pitch"),
             ("[ ]", "at-bat"),
             ("␣", "replay"),

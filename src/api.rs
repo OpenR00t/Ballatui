@@ -3,7 +3,7 @@
 
 //! Blocking client for the public MLB Stats API.
 
-use crate::model::{FieldInfo, GameFeed, Schedule, Standings, Venues};
+use crate::model::{FieldInfo, GameFeed, Schedule, Standings, Venues, WpPoint};
 use crate::stats::{
     ArsenalPitch, League, People, PlayerStats, Stat, StatsResponse, arsenal_from,
     head_to_head_from, league_from,
@@ -67,6 +67,13 @@ impl Api {
             .filter(|d| !d.games.is_empty())
             .map(|d| d.date)
             .collect())
+    }
+
+    pub fn win_probability(&self, game_pk: u64) -> Result<Vec<WpPoint>> {
+        self.get(&format!(
+            "/api/v1/game/{game_pk}/winProbability\
+             ?fields=atBatIndex,homeTeamWinProbability,homeTeamWinProbabilityAdded,leverageIndex"
+        ))
     }
 
     pub fn feed(&self, game_pk: u64) -> Result<GameFeed> {

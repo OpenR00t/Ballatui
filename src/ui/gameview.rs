@@ -6,7 +6,7 @@
 
 use super::{
     boxscore, gamecast, matchup, message, ordinal, pad, panel, pitches, plays, rpad, scorecard,
-    spray,
+    spray, winprob,
 };
 use crate::app::{App, GameTab, GameView, SPEEDS};
 use crate::game::{Cursor, Situation, total_steps};
@@ -77,6 +77,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         GameTab::Matchup => matchup::draw(f, &ctx, body),
         GameTab::Spray => spray::draw(f, &ctx, g, body),
         GameTab::Pitches => pitches::draw(f, &ctx, g, body),
+        GameTab::WinProb => winprob::draw(f, &ctx, g, body),
         GameTab::Box => boxscore::draw(f, &ctx, g.home_side, g.scroll, body),
         GameTab::Scorecard => scorecard::draw(f, &ctx, g.home_side, g.scroll, g.hscroll, body),
         GameTab::Plays => {
@@ -239,6 +240,22 @@ fn draw_header(f: &mut Frame, g: &GameView, ctx: &Ctx, area: Rect) {
             ),
             style,
         ));
+    }
+    if let Some(w) = g.wp_now()
+        && !gd.status.is_preview()
+    {
+        let home = w.home_team_win_probability;
+        let (abbr, pct) = if home >= 50.0 {
+            (&gd.teams.home.abbreviation, home)
+        } else {
+            (&gd.teams.away.abbreviation, 100.0 - home)
+        };
+        if !gd.status.is_final() || !g.following() {
+            l2.push(Span::styled(
+                format!("  ·  {abbr} {pct:.0}% to win"),
+                theme::secondary(),
+            ));
+        }
     }
     if g.loading {
         l2.push(Span::styled("  ⟳", theme::key()));

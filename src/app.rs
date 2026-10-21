@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::game::{
     BattedBall, Cursor, GamePitcher, LogLine, PitchRec, batted_balls, pitches, play_log,
 };
-use crate::model::{GameFeed, ScheduleGame, Standings};
+use crate::model::{GameFeed, ScheduleGame, Standings, WpPoint};
 use crate::stats::{ArsenalPitch, League, Load, PlayerStats, Stat, StatsCache};
 use anyhow::Result;
 use chrono::{Duration as Days, Local, NaiveDate, Timelike};
@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 pub enum Msg {
     Schedule(NaiveDate, Result<Vec<ScheduleGame>>),
     Feed(u64, Box<Result<GameFeed>>),
+    WinProb(u64, Result<Vec<WpPoint>>),
     Standings(StandingsKind, Result<Standings>),
     /// Nearest day with games, searching forward (`true`) or back.
     GameDay(bool, Result<Option<NaiveDate>>),
@@ -59,17 +60,19 @@ pub enum GameTab {
     Matchup,
     Pitches,
     Spray,
+    WinProb,
     Box,
     Scorecard,
     Plays,
 }
 
 impl GameTab {
-    pub const ALL: [GameTab; 7] = [
+    pub const ALL: [GameTab; 8] = [
         Self::Gamecast,
         Self::Matchup,
         Self::Pitches,
         Self::Spray,
+        Self::WinProb,
         Self::Box,
         Self::Scorecard,
         Self::Plays,
@@ -80,6 +83,7 @@ impl GameTab {
             Self::Matchup => "Matchup",
             Self::Pitches => "Pitches",
             Self::Spray => "Spray",
+            Self::WinProb => "Win prob",
             Self::Box => "Box score",
             Self::Scorecard => "Scorecard",
             Self::Plays => "Plays",
@@ -91,6 +95,7 @@ impl GameTab {
             Self::Matchup => 'm',
             Self::Pitches => 'i',
             Self::Spray => 'y',
+            Self::WinProb => 'w',
             Self::Box => 'b',
             Self::Scorecard => 's',
             Self::Plays => 'p',
@@ -118,6 +123,9 @@ impl SprayTeam {
         }
     }
 }
+
+/// Biggest swings listed on the win-probability tab.
+pub const SWINGS_SHOWN: usize = 8;
 
 pub const SPEEDS: [f64; 7] = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0];
 
@@ -150,6 +158,14 @@ pub struct GameView {
     pub spray_batter_only: bool,
     /// Pitcher picked on the pitches tab; `None` follows whoever is pitching.
     pub pitch_sel: Option<u64>,
+    /// Win probability per plate appearance, refreshed as plays finish.
+    pub wp: Option<Vec<WpPoint>>,
+    pub wp_loading: bool,
+    pub wp_error: Option<String>,
+    /// Finished plays when win probability was last fetched.
+    pub wp_plays: usize,
+    pub wp_fetched: Option<Instant>,
+    pub wp_sel: usize,
 }
 
 impl GameView {
@@ -176,6 +192,12 @@ impl GameView {
             spray_team: SprayTeam::Both,
             spray_batter_only: false,
             pitch_sel: None,
+            wp: None,
+            wp_loading: false,
+            wp_error: None,
+            wp_plays: 0,
+            wp_fetched: None,
+            wp_sel: 0,
         }
     }
 
@@ -264,10 +286,57 @@ impl GameView {
         self.pitch_sel = Some(list[j].id);
     }
 
+    /// Win probability at the shown moment: after the last finished play.
+    pub fn wp_now(&self) -> Option<&WpPoint> {
+        let c = self.at()?;
+        let plays = self.plays();
+        let done = |i: usize| {
+            plays.get(i).is_some_and(|p| {
+                p.about.is_complete && (i < c.play || c.events >= p.play_events.len())
+            })
+        };
+        let last = (0..=c.play).rev().find(|i| done(*i))?;
+        self.wp.as_ref()?.iter().find(|w| w.at_bat_index == last)
+    }
+
+    /// Plays up to the shown moment, biggest win-probability swings first.
+    pub fn wp_swings(&self) -> Vec<WpPoint> {
+        let Some(c) = self.at() else {
+            return Vec::new();
+        };
+        let plays = self.plays();
+        let mut v: Vec<WpPoint> = self
+            .wp
+            .as_ref()
+            .map(|w| {
+                w.iter()
+                    .filter(|p| {
+                        p.at_bat_index < c.play
+                            || (p.at_bat_index == c.play
+                                && plays
+                                    .get(c.play)
+                                    .is_some_and(|pl| c.events >= pl.play_events.len()))
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort_by(|a, b| {
+            b.home_team_win_probability_added
+                .abs()
+                .total_cmp(&a.home_team_win_probability_added.abs())
+        });
+        v
+    }
+
     /// The selectable list on the current tab, if it has one.
     fn list_sel(&mut self) -> Option<(&mut usize, usize)> {
         match self.tab {
             GameTab::Plays => Some((&mut self.plays_sel, self.plays_len)),
+            GameTab::WinProb => {
+                let len = self.wp_swings().len().min(SWINGS_SHOWN);
+                Some((&mut self.wp_sel, len))
+            }
             GameTab::Spray => {
                 let len = self.spray_balls().len();
                 // usize::MAX means "newest", so new balls stay selected live.
@@ -476,6 +545,24 @@ impl App {
                         Err(e) => g.error = Some(format!("{e:#}")),
                     }
                 }
+                Msg::WinProb(pk, r) => {
+                    let Some(g) = self.game.as_mut() else {
+                        continue;
+                    };
+                    if g.pk != pk {
+                        continue;
+                    }
+                    g.wp_loading = false;
+                    g.wp_fetched = Some(Instant::now());
+                    match r {
+                        Ok(w) => {
+                            g.wp_plays = w.len();
+                            g.wp = Some(w);
+                            g.wp_error = None;
+                        }
+                        Err(e) => g.wp_error = Some(format!("{e:#}")),
+                    }
+                }
                 Msg::GameDay(forward, r) => match r {
                     Ok(Some(d)) => {
                         self.date = d;
@@ -607,7 +694,36 @@ impl App {
         if want_feed {
             self.fetch_feed();
         }
+        self.ensure_win_prob();
         self.ensure_matchup_stats();
+    }
+
+    /// Fetches win probability once a game has plays, and again whenever
+    /// more plays have finished (at most every live poll).
+    fn ensure_win_prob(&mut self) {
+        let poll = Duration::from_secs(self.cfg.live_poll_seconds);
+        let Some(g) = self.game.as_mut() else { return };
+        let Some(feed) = g.feed.as_ref() else { return };
+        if g.wp_loading {
+            return;
+        }
+        let done = feed
+            .live_data
+            .plays
+            .all_plays
+            .iter()
+            .filter(|p| p.about.is_complete)
+            .count();
+        let stale = g.wp.is_none() || done > g.wp_plays;
+        let due = g.wp_fetched.is_none_or(|t| t.elapsed() >= poll);
+        if done == 0 || !stale || !due {
+            return;
+        }
+        g.wp_loading = true;
+        let (tx, api, pk) = (self.tx.clone(), self.api.clone(), g.pk);
+        thread::spawn(move || {
+            let _ = tx.send(Msg::WinProb(pk, api.win_probability(pk)));
+        });
     }
 
     /// Fetches stats for the batter and pitcher at the shown moment, once
@@ -1016,6 +1132,22 @@ impl App {
             }
             KeyCode::Char('<') | KeyCode::Char(',') => g.hscroll = g.hscroll.saturating_sub(8),
             KeyCode::Char('>') | KeyCode::Char('.') => g.hscroll = g.hscroll.saturating_add(8),
+            KeyCode::Enter if g.tab == GameTab::WinProb => {
+                let swings = g.wp_swings();
+                if let Some(w) = swings.get(g.wp_sel) {
+                    let p = w.at_bat_index;
+                    if let Some(pl) = g.plays().get(p) {
+                        let ev = pl.play_events.len();
+                        g.replay.playing = false;
+                        g.set_cursor(Some(Cursor {
+                            play: p,
+                            events: ev,
+                        }));
+                        g.tab = GameTab::Gamecast;
+                        g.scroll = 0;
+                    }
+                }
+            }
             KeyCode::Enter if g.tab == GameTab::Spray => {
                 let balls = g.spray_balls();
                 if let Some(b) = balls.get(g.spray_sel.min(balls.len().saturating_sub(1))) {
