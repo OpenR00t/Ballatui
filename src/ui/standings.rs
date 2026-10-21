@@ -53,13 +53,16 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let table_w = (TEAM_W + COLS.iter().map(|c| c.1).sum::<usize>() + 2) as u16;
     let side_by_side = inner.width >= table_w * 2 + 4;
     let favs = &app.cfg.favorites;
-    let render = |lg: u64, recs: &[&StandingsRecord]| -> Vec<Line<'static>> {
+    // Lines plus the team on each line (for clicks).
+    let render = |lg: u64, recs: &[&StandingsRecord]| -> (Vec<Line<'static>>, Vec<Option<u64>>) {
         let mut lines = vec![Line::styled(
             format!(" {}", league_name(lg)),
             theme::title(),
         )];
+        let mut ids = vec![None];
         for r in recs {
             lines.push(Line::raw(""));
+            ids.push(None);
             let name = match kind {
                 StandingsKind::Division => r
                     .division
@@ -82,20 +85,23 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
                 head.push(Span::styled(rpad(c, w), theme::accent()));
             }
             lines.push(Line::from(head));
+            ids.push(None);
             for (i, t) in r.team_records.iter().enumerate() {
                 lines.push(team_line(t, kind, favs));
+                ids.push(Some(t.team.id));
                 if kind == StandingsKind::WildCard && i == 2 {
                     lines.push(Line::styled(
                         format!(" {}", "┄".repeat(table_w as usize - 2)),
                         Style::new().fg(theme::BG3),
                     ));
+                    ids.push(None);
                 }
             }
         }
-        lines
+        (lines, ids)
     };
-    let left = render(leagues[0].0, &leagues[0].1);
-    let right = render(leagues[1].0, &leagues[1].1);
+    let (left, left_ids) = render(leagues[0].0, &leagues[0].1);
+    let (right, right_ids) = render(leagues[1].0, &leagues[1].1);
     let mut footer = vec![Line::raw("")];
     // Legend for the clinch letters after team names (not keys).
     let mut legend = vec![Span::styled(" Clinched: ", theme::meta())];
@@ -129,15 +135,38 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(Paragraph::new(left).scroll((s, 0)), a);
         f.render_widget(Paragraph::new(right).scroll((s, 0)), b);
         f.render_widget(Paragraph::new(footer), foot);
+        register(app, a, &left_ids, s, table_w);
+        register(app, b, &right_ids, s, table_w);
     } else {
         let mut all = left;
         all.push(Line::raw(""));
         all.extend(right);
         all.extend(footer);
+        let mut ids = left_ids;
+        ids.push(None);
+        ids.extend(right_ids);
         app.standings_scroll = app
             .standings_scroll
             .min((all.len() as u16).saturating_sub(inner.height));
         f.render_widget(Paragraph::new(all).scroll((app.standings_scroll, 0)), inner);
+        register(app, inner, &ids, app.standings_scroll, table_w);
+    }
+}
+
+/// Makes each visible team row clickable (opens the team page).
+fn register(app: &App, area: Rect, ids: &[Option<u64>], scroll: u16, width: u16) {
+    for (i, id) in ids.iter().enumerate() {
+        let Some(id) = id else { continue };
+        let Some(row) = (i as u16).checked_sub(scroll) else {
+            continue;
+        };
+        if row >= area.height {
+            break;
+        }
+        app.hit(
+            Rect::new(area.x, area.y + row, width.min(area.width), 1),
+            crate::app::Click::StandingsTeam(*id),
+        );
     }
 }
 

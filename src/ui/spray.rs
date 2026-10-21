@@ -270,6 +270,13 @@ fn draw_list(
         .unwrap_or(0);
     let mut lines = head;
     for (i, b) in balls.iter().enumerate().skip(first).take(rows_h) {
+        let y = inner.y + lines.len() as u16;
+        if y < inner.y + inner.height {
+            ctx.hit(
+                Rect::new(inner.x, y, inner.width, 1),
+                crate::app::Click::SprayRow(i),
+            );
+        }
         let selected = Some(i) == sel;
         let (glyph, color) = ball_style(b);
         let inn = format!("{}{}", if b.top { "▲" } else { "▼" }, b.inning);

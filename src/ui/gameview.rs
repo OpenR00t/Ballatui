@@ -36,12 +36,23 @@ pub struct Ctx<'a> {
     pub season: i32,
     /// Show a called third strike as the backwards K.
     pub backwards_k: bool,
+    hits: &'a std::cell::RefCell<Vec<(Rect, crate::app::Click)>>,
+}
+
+impl Ctx<'_> {
+    /// Registers a clickable area for this frame.
+    pub fn hit(&self, area: Rect, click: crate::app::Click) {
+        if area.width > 0 && area.height > 0 {
+            self.hits.borrow_mut().push((area, click));
+        }
+    }
 }
 
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let favorites = app.cfg.favorites.clone();
     let backwards_k = app.cfg.backwards_k;
     let stats = &app.stats;
+    let hits = &app.hits;
     let Some(g) = app.game.as_mut() else { return };
     let Some(feed) = g.feed.as_ref() else {
         let (text, style) = match &g.error {
@@ -64,6 +75,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         stats,
         season: feed.game_data.game.season.parse().unwrap_or(0),
         backwards_k,
+        hits,
     };
 
     let [head, line, tabs, body] = Layout::vertical([
@@ -75,7 +87,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     .areas(area);
     draw_header(f, g, &ctx, head);
     draw_linescore(f, &ctx, cursor.is_some(), line);
-    draw_tab_bar(f, g.tab, tabs);
+    draw_tab_bar(f, &ctx, g.tab, tabs);
     match g.tab {
         GameTab::Gamecast => gamecast::draw(f, &ctx, g.scroll, body),
         GameTab::Matchup => matchup::draw(f, &ctx, body),
@@ -85,7 +97,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         GameTab::Box => boxscore::draw(f, &ctx, g.home_side, g.scroll, body),
         GameTab::Scorecard => scorecard::draw(f, &ctx, g.home_side, g.scroll, g.hscroll, body),
         GameTab::Plays => {
-            let (len, _) = plays::draw(f, &ctx, g.plays_sel, body);
+            let (len, _) = plays::draw(f, &ctx, g.plays_sel, &g.plays_top, body);
             g.plays_len = len;
             if g.plays_sel >= len {
                 g.plays_sel = len.saturating_sub(1);
@@ -409,10 +421,17 @@ pub fn linescore_lines(
     out
 }
 
-fn draw_tab_bar(f: &mut Frame, tab: GameTab, area: Rect) {
+fn draw_tab_bar(f: &mut Frame, ctx: &Ctx, tab: GameTab, area: Rect) {
     let mut spans = vec![Span::raw(" ")];
+    let mut x = area.x + 1;
     for t in GameTab::ALL {
         let active = t == tab;
+        let w = 2 + t.label().len() as u16;
+        ctx.hit(
+            Rect::new(x, area.y, w, 1).intersection(area),
+            crate::app::Click::GameTab(t),
+        );
+        x += w + 3;
         spans.push(Span::styled(format!("{} ", t.key()), theme::key()));
         spans.push(Span::styled(
             t.label(),

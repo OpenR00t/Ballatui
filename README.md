@@ -90,7 +90,11 @@ Press `?` in the app for the full list.
 | Standings | `w` divisions ↔ wild card · `j`/`k` scroll |
 | Team | `j`/`k` pick a game · `Enter` open it · `o`/`R` overview/roster · `t` pick a team · `f` next favorite · `r` refresh |
 
-The mouse wheel scrolls.
+**Mouse:** click the tabs, games, plays, balls in play, swings, pitchers and
+team rows. A click selects; clicking the selected row again opens it (like
+Enter). Click a standings row for that team's page, a play in the gamecast
+log to jump there, and the ◀ ▶ around the scoreboard date to change day. The
+wheel scrolls.
 
 ## Settings
 

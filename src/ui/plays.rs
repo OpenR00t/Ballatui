@@ -16,13 +16,20 @@ use ratatui::widgets::{Paragraph, Wrap};
 
 /// Draws the list; returns the number of selectable lines and the
 /// selected play index.
-pub fn draw(f: &mut Frame, ctx: &Ctx, sel: usize, area: Rect) -> (usize, Option<usize>) {
+pub fn draw(
+    f: &mut Frame,
+    ctx: &Ctx,
+    sel: usize,
+    top_cell: &std::cell::Cell<usize>,
+    area: Rect,
+) -> (usize, Option<usize>) {
     let block = panel("Plays  ·  ⏎ show in gamecast", true);
     let inner = block.inner(area);
     f.render_widget(block, area);
     let log = play_log(&ctx.feed.live_data.plays.all_plays, ctx.cursor);
     let gd = &ctx.feed.game_data;
     let mut lines: Vec<Line> = Vec::new();
+    let mut clicks: Vec<Option<crate::app::Click>> = Vec::new();
     let mut sel_line = 0usize;
     let mut half = None;
     for (i, l) in log.iter().enumerate() {
@@ -31,6 +38,7 @@ pub fn draw(f: &mut Frame, ctx: &Ctx, sel: usize, area: Rect) -> (usize, Option<
             half = Some(key);
             if !lines.is_empty() {
                 lines.push(Line::raw(""));
+                clicks.push(None);
             }
             let team = if l.top {
                 &gd.teams.away
@@ -49,6 +57,7 @@ pub fn draw(f: &mut Frame, ctx: &Ctx, sel: usize, area: Rect) -> (usize, Option<
                 ),
                 Span::styled(format!("  {}", team.team_name), theme::meta()),
             ]));
+            clicks.push(None);
         }
         if i == sel {
             sel_line = lines.len();
@@ -84,13 +93,21 @@ pub fn draw(f: &mut Frame, ctx: &Ctx, sel: usize, area: Rect) -> (usize, Option<
             line = line.style(theme::selected().add_modifier(Modifier::BOLD));
         }
         lines.push(line);
+        clicks.push(Some(crate::app::Click::PlaysRow(i)));
     }
     if log.is_empty() {
         lines.push(Line::styled(" No plays yet.", theme::meta()));
     }
-    // Keep the selection in view (lines can wrap, so leave some slack).
+    // Keep the selection on screen, counting wrapped rows.
+    let rows = super::wrapped_rows(&lines, inner.width);
+    let before: usize = rows.iter().take(sel_line).map(|r| *r as usize).sum();
+    let sel_h = rows.get(sel_line).copied().unwrap_or(1) as usize;
     let h = inner.height as usize;
-    let top = sel_line.saturating_sub(h / 3);
+    let top = super::keep_in_view(top_cell.get(), before, before + sel_h, h);
+    top_cell.set(top);
+    for (r, c) in super::wrapped_hits(&lines, &clicks, inner, top as u16) {
+        ctx.hit(r, c);
+    }
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })

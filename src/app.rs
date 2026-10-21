@@ -137,6 +137,33 @@ impl SprayTeam {
 /// Biggest swings listed on the win-probability tab.
 pub const SWINGS_SHOWN: usize = 8;
 
+/// Something on screen a left click acts on. Drawing code registers these
+/// with their area each frame; the topmost match wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Click {
+    /// Top tab bar: 1-4.
+    Screen(char),
+    GameTab(GameTab),
+    TeamTab(TeamTab),
+    PrevDay,
+    NextDay,
+    /// Scoreboard game row.
+    ScoreRow(usize),
+    /// Standings row: opens that team's page.
+    StandingsTeam(u64),
+    /// Team schedule row.
+    TeamGame(usize),
+    PickerRow(usize),
+    /// Game lists: plays, spray, win-probability swings.
+    PlaysRow(usize),
+    SprayRow(usize),
+    SwingRow(usize),
+    /// Pitches tab: show this pitcher.
+    Pitcher(u64),
+    /// Gamecast play log: jump to the end of this play.
+    Play(usize),
+}
+
 pub const SPEEDS: [f64; 7] = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0];
 
 pub struct Replay {
@@ -162,6 +189,9 @@ pub struct GameView {
     pub plays_sel: usize,
     /// Number of log lines in the last drawn plays list (for clamping).
     pub plays_len: usize,
+    /// First row of the plays list on screen (kept while the selection
+    /// stays visible, so clicks land where they were aimed).
+    pub plays_top: std::cell::Cell<usize>,
     pub spray_sel: usize,
     pub spray_team: SprayTeam,
     /// Only the batter at the shown moment.
@@ -198,6 +228,7 @@ impl GameView {
             hscroll: 0,
             plays_sel: 0,
             plays_len: 0,
+            plays_top: std::cell::Cell::new(0),
             spray_sel: usize::MAX,
             spray_team: SprayTeam::Both,
             spray_batter_only: false,
@@ -396,6 +427,8 @@ pub struct App {
     /// Selected game in the team schedule; `usize::MAX` = pick a default.
     pub team_sel: usize,
     pub team_scroll: u16,
+    /// First schedule row on screen, kept while the selection is visible.
+    pub team_top: std::cell::Cell<usize>,
     /// Team picker popup, with its selected row.
     pub picker: Option<usize>,
     pub help: bool,
@@ -403,6 +436,8 @@ pub struct App {
     pending_g: bool,
     pub status: Option<(String, Instant)>,
     pub last_title: String,
+    /// Clickable areas from the last frame.
+    pub hits: std::cell::RefCell<Vec<(ratatui::layout::Rect, Click)>>,
 }
 
 pub fn baseball_today(rollover_hour: u32) -> NaiveDate {
@@ -446,12 +481,14 @@ impl App {
             team_tab: TeamTab::Overview,
             team_sel: usize::MAX,
             team_scroll: 0,
+            team_top: std::cell::Cell::new(0),
             picker: None,
             help: false,
             quit: false,
             pending_g: false,
             status: None,
             last_title: String::new(),
+            hits: std::cell::RefCell::new(Vec::new()),
         };
         app.fetch_schedule();
         if let Some(pk) = game {
@@ -855,7 +892,111 @@ impl App {
         self.games.as_ref()?.get(self.sel)
     }
 
+    /// Registers a clickable area for this frame.
+    pub fn hit(&self, area: ratatui::layout::Rect, click: Click) {
+        if area.width > 0 && area.height > 0 {
+            self.hits.borrow_mut().push((area, click));
+        }
+    }
+
+    fn key(&mut self, code: KeyCode) {
+        self.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn on_click(&mut self, col: u16, row: u16) {
+        if self.help {
+            self.help = false;
+            return;
+        }
+        let pos = ratatui::layout::Position::new(col, row);
+        let found = self
+            .hits
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| r.contains(pos))
+            .map(|(_, c)| *c);
+        // With the team picker open, a click outside it closes it.
+        if self.picker.is_some() && !matches!(found, Some(Click::PickerRow(_))) {
+            self.picker = None;
+            return;
+        }
+        let Some(click) = found else { return };
+        match click {
+            Click::Screen(c) => self.key(KeyCode::Char(c)),
+            Click::GameTab(t) => {
+                if let Some(g) = self.game.as_mut() {
+                    g.tab = t;
+                    g.scroll = 0;
+                }
+            }
+            Click::TeamTab(t) => {
+                self.team_tab = t;
+                self.team_scroll = 0;
+            }
+            Click::PrevDay => self.change_date(-1),
+            Click::NextDay => self.change_date(1),
+            Click::ScoreRow(i) => {
+                if self.sel == i {
+                    self.key(KeyCode::Enter);
+                } else {
+                    self.sel = i;
+                }
+            }
+            Click::StandingsTeam(id) => {
+                self.open_team_screen();
+                self.team_tab = TeamTab::Overview;
+                self.set_team(id);
+            }
+            Click::TeamGame(i) => {
+                if self.team_sel == i {
+                    self.key(KeyCode::Enter);
+                } else {
+                    self.team_sel = i;
+                }
+            }
+            Click::PickerRow(i) => {
+                self.picker = Some(i);
+                self.key(KeyCode::Enter);
+            }
+            Click::PlaysRow(i) | Click::SprayRow(i) | Click::SwingRow(i) => {
+                let Some(g) = self.game.as_mut() else { return };
+                let sel = match click {
+                    Click::PlaysRow(_) => &mut g.plays_sel,
+                    Click::SprayRow(_) => &mut g.spray_sel,
+                    _ => &mut g.wp_sel,
+                };
+                if *sel == i {
+                    self.key(KeyCode::Enter);
+                } else {
+                    *sel = i;
+                }
+            }
+            Click::Pitcher(id) => {
+                if let Some(g) = self.game.as_mut() {
+                    g.pitch_sel = Some(id);
+                }
+            }
+            Click::Play(p) => {
+                if let Some(g) = self.game.as_mut()
+                    && let Some(pl) = g.plays().get(p)
+                {
+                    let ev = pl.play_events.len();
+                    g.replay.playing = false;
+                    g.set_cursor(Some(Cursor {
+                        play: p,
+                        events: ev,
+                    }));
+                }
+            }
+        }
+    }
+
     pub fn on_mouse(&mut self, m: MouseEvent) {
+        if let MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left) = m.kind {
+            self.on_click(m.column, m.row);
+            return;
+        }
         let delta: i32 = match m.kind {
             MouseEventKind::ScrollDown => 3,
             MouseEventKind::ScrollUp => -3,
@@ -1069,6 +1210,7 @@ impl App {
         self.team_id = Some(id);
         self.team_sel = usize::MAX;
         self.team_scroll = 0;
+        self.team_top.set(0);
         if !matches!(self.team_pages.get(&id), Some(Load::Ready(_))) {
             self.fetch_team_page(id);
         }

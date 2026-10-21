@@ -2,7 +2,7 @@
 // Copyright (C) 2026 The Ballatui contributors
 
 use super::{gameview, local_time, message, ordinal, pad, panel, rpad};
-use crate::app::App;
+use crate::app::{App, Click};
 use crate::model::{ScheduleGame, ScheduleSide};
 use crate::theme;
 use ratatui::Frame;
@@ -23,9 +23,15 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     if app.date == today {
         title.push_str(" · today");
     }
-    let block = panel(&format!("◀ {title} ▶"), true);
+    let label = format!("◀ {title} ▶");
+    let block = panel(&label, true);
     let inner = block.inner(list_area);
     f.render_widget(block, list_area);
+    // The arrows in the title change the day.
+    let lw = unicode_width::UnicodeWidthStr::width(label.as_str()) as u16;
+    let ty = list_area.y;
+    app.hit(Rect::new(list_area.x + 1, ty, 3, 1), Click::PrevDay);
+    app.hit(Rect::new(list_area.x + lw, ty, 3, 1), Click::NextDay);
 
     let Some(games) = app.games.as_ref() else {
         let (text, style) = match &app.sched_error {
@@ -50,7 +56,17 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let visible = (inner.height as usize / per).max(1);
     let first = app.sel.saturating_sub(visible - 1);
     let mut lines = Vec::new();
-    for (i, g) in games.iter().enumerate().skip(first).take(visible) {
+    for (n, (i, g)) in games
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(visible)
+        .enumerate()
+    {
+        app.hit(
+            Rect::new(inner.x, inner.y + (n * per) as u16, inner.width, 2).intersection(inner),
+            Click::ScoreRow(i),
+        );
         let sel = i == app.sel;
         let mut rows = game_rows(app, g, inner.width as usize);
         if sel {

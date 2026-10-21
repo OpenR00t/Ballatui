@@ -214,6 +214,13 @@ fn draw_swings(f: &mut Frame, ctx: &Ctx, g: &GameView, top: &[crate::model::WpPo
     let w = inner.width as usize;
     let mut lines = Vec::new();
     for (i, s) in top.iter().enumerate() {
+        let y = inner.y + lines.len() as u16;
+        if y < inner.y + inner.height {
+            ctx.hit(
+                Rect::new(inner.x, y, inner.width, 1),
+                crate::app::Click::SwingRow(i),
+            );
+        }
         let Some(p) = plays.get(s.at_bat_index) else {
             continue;
         };

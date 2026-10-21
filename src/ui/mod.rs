@@ -27,6 +27,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    app.hits.borrow_mut().clear();
     let area = f.area();
     f.render_widget(Block::new().style(Style::new().bg(theme::BG0)), area);
     let [top, body, bottom] = Layout::vertical([
@@ -50,8 +51,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
     let mut spans = vec![Span::styled(" ⚾ Ballatui ", theme::accent_bold())];
+    let mut x = area.x + spans[0].content.width() as u16;
     let mut tab = |n: &str, label: String, active: bool| {
         spans.push(Span::styled(" │ ", Style::new().fg(theme::BG3)));
+        let start = x + 3;
+        let w = (n.width() + 1 + label.width()) as u16;
+        app.hit(
+            Rect::new(start.saturating_sub(1), area.y, w + 2, 1).intersection(area),
+            crate::app::Click::Screen(n.chars().next().unwrap_or('1')),
+        );
+        x = start + w;
         spans.push(Span::styled(n.to_string(), theme::key()));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
@@ -153,6 +162,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
                 ("1 2 3 4", "scores · standings · open game · team"),
                 ("?", "this help (any key closes)"),
                 ("q / Ctrl-c", "quit (in a game: back)"),
+                ("mouse", "click selects, click again opens; wheel scrolls"),
             ],
         ),
         (
@@ -231,6 +241,66 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             .style(Style::new().bg(theme::BG0_H)),
         r,
     );
+}
+
+/// Screen rows of each line when wrapped to `width`, exactly as a wrapping
+/// Paragraph draws them.
+pub fn wrapped_rows(lines: &[Line], width: u16) -> Vec<u16> {
+    lines
+        .iter()
+        .map(|l| {
+            Paragraph::new(l.clone())
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .line_count(width.max(1))
+                .max(1) as u16
+        })
+        .collect()
+}
+
+/// Clickable areas for the lines of a wrapping, scrolled Paragraph.
+pub fn wrapped_hits(
+    lines: &[Line],
+    clicks: &[Option<crate::app::Click>],
+    area: Rect,
+    scroll: u16,
+) -> Vec<(Rect, crate::app::Click)> {
+    let rows = wrapped_rows(lines, area.width);
+    let mut out = Vec::new();
+    let mut y: i32 = -(scroll as i32);
+    for (h, c) in rows.iter().zip(clicks) {
+        let top = y.max(0);
+        let bottom = (y + *h as i32).min(area.height as i32);
+        if let Some(c) = c
+            && bottom > top
+        {
+            out.push((
+                Rect::new(
+                    area.x,
+                    area.y + top as u16,
+                    area.width,
+                    (bottom - top) as u16,
+                ),
+                *c,
+            ));
+        }
+        y += *h as i32;
+        if y >= area.height as i32 {
+            break;
+        }
+    }
+    out
+}
+
+/// Scroll position that keeps rows `start..end` on screen, moving as
+/// little as possible from `top`.
+pub fn keep_in_view(top: usize, start: usize, end: usize, height: usize) -> usize {
+    if start < top {
+        start
+    } else if end > top + height {
+        end.saturating_sub(height)
+    } else {
+        top
+    }
 }
 
 pub fn centered(area: Rect, w: u16, h: u16) -> Rect {
@@ -344,5 +414,15 @@ mod tests {
         assert_eq!(ordinal(1), "1st");
         assert_eq!(ordinal(12), "12th");
         assert_eq!(ordinal(23), "23rd");
+    }
+
+    #[test]
+    fn scrolling_only_moves_when_needed() {
+        // Selection already visible: stay put, so a second click hits it.
+        assert_eq!(keep_in_view(10, 15, 16, 20), 10);
+        // Above the window: scroll up to it.
+        assert_eq!(keep_in_view(10, 4, 5, 20), 4);
+        // Below the window: scroll just enough to show it.
+        assert_eq!(keep_in_view(10, 35, 37, 20), 17);
     }
 }

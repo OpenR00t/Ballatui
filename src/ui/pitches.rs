@@ -156,6 +156,13 @@ fn draw_pitchers(
                 theme::accent2(),
             ));
         }
+        let y = area.y + 1 + lines.len() as u16;
+        if y + 1 < area.y + area.height {
+            ctx.hit(
+                Rect::new(area.x + 1, y, area.width.saturating_sub(2), 1),
+                crate::app::Click::Pitcher(p.id),
+            );
+        }
         let sel = p.id == shown;
         let mark = if Some(p.id) == current { "●" } else { " " };
         let name = last_name(ctx.feed, p.id, &p.name);

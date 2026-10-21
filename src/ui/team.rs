@@ -5,7 +5,7 @@
 //! team stats ranked against the league, leaders, and the roster.
 
 use super::{centered, local_time, message, ordinal, pad, panel, rpad};
-use crate::app::{App, StandingsKind, TeamTab};
+use crate::app::{App, Click, StandingsKind, TeamTab};
 use crate::model::{ScheduleGame, TeamRecord, division_name};
 use crate::stats::{Load, text};
 use crate::team::{Ranked, RosterPlayer, TeamPage};
@@ -58,7 +58,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
                 page.and_then(|p| p.ready()),
                 head,
             );
-            draw_tab_bar(f, app.team_tab, tabs);
+            draw_tab_bar(f, app, app.team_tab, tabs);
             match page {
                 Some(Load::Ready(p)) => match app.team_tab {
                     TeamTab::Overview => draw_overview(f, app, p, body),
@@ -197,7 +197,15 @@ fn draw_header(
     );
 }
 
-fn draw_tab_bar(f: &mut Frame, tab: TeamTab, area: Rect) {
+fn draw_tab_bar(f: &mut Frame, app: &App, tab: TeamTab, area: Rect) {
+    app.hit(
+        Rect::new(area.x + 1, area.y, 10, 1).intersection(area),
+        Click::TeamTab(TeamTab::Overview),
+    );
+    app.hit(
+        Rect::new(area.x + 14, area.y, 8, 1).intersection(area),
+        Click::TeamTab(TeamTab::Roster),
+    );
     let item = |k: &str, label: &str, active: bool| -> Vec<Span<'static>> {
         vec![
             Span::styled(format!("{k} "), theme::key()),
@@ -287,6 +295,8 @@ fn draw_schedule(f: &mut Frame, app: &App, games: &[ScheduleGame], area: Rect) {
     let today = app.date.format("%Y-%m-%d").to_string();
     let w = inner.width as usize;
     let mut rows: Vec<Line> = Vec::new();
+    // Which game each row shows (the "today" marker shows none).
+    let mut row_game: Vec<Option<usize>> = Vec::new();
     let mut sel_row = 0;
     let mut marked_today = false;
     for (i, g) in games.iter().enumerate() {
@@ -296,6 +306,7 @@ fn draw_schedule(f: &mut Frame, app: &App, games: &[ScheduleGame], area: Rect) {
                 format!(" {}", "┄".repeat(w.saturating_sub(2))),
                 Style::new().fg(theme::BG3),
             ));
+            row_game.push(None);
         }
         let home = g.teams.home.team.id == id;
         let (us, them) = if home {
@@ -377,11 +388,20 @@ fn draw_schedule(f: &mut Frame, app: &App, games: &[ScheduleGame], area: Rect) {
             line = line.style(theme::selected());
         }
         rows.push(line);
+        row_game.push(Some(i));
     }
     let h = inner.height as usize;
-    let first = sel_row
-        .saturating_sub(h / 2)
+    let first = super::keep_in_view(app.team_top.get(), sel_row, sel_row + 1, h)
         .min(rows.len().saturating_sub(h));
+    app.team_top.set(first);
+    for (n, g) in row_game.iter().enumerate().skip(first).take(h) {
+        if let Some(i) = g {
+            app.hit(
+                Rect::new(inner.x, inner.y + (n - first) as u16, inner.width, 1),
+                Click::TeamGame(*i),
+            );
+        }
+    }
     f.render_widget(Paragraph::new(rows).scroll((first as u16, 0)), inner);
 }
 
@@ -624,7 +644,17 @@ fn draw_picker(f: &mut Frame, app: &App, sel: usize, area: Rect) {
     let inner_h = h.saturating_sub(2) as usize;
     let first = sel.saturating_sub(inner_h.saturating_sub(1));
     let mut lines = Vec::new();
-    for (i, t) in teams.iter().enumerate().skip(first).take(inner_h) {
+    for (n, (i, t)) in teams
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(inner_h)
+        .enumerate()
+    {
+        app.hit(
+            Rect::new(r.x + 1, r.y + 1 + n as u16, r.width.saturating_sub(2), 1),
+            Click::PickerRow(i),
+        );
         let fav = app.cfg.favorites.iter().any(|f| f == &t.abbreviation);
         let div = t
             .division

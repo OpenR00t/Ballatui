@@ -483,7 +483,9 @@ fn draw_log(f: &mut Frame, ctx: &Ctx, scroll: u16, area: Rect) {
     f.render_widget(block, area);
     let log = crate::game::play_log(&ctx.feed.live_data.plays.all_plays, ctx.cursor);
     let mut lines = Vec::new();
+    let mut clicks = Vec::new();
     for l in log.iter().rev() {
+        clicks.push(Some(crate::app::Click::Play(l.play)));
         let tag = format!("{}{:<2}", if l.top { "▲" } else { "▼" }, l.inning);
         let outs = if l.is_action {
             String::new()
@@ -509,6 +511,9 @@ fn draw_log(f: &mut Frame, ctx: &Ctx, scroll: u16, area: Rect) {
             ));
         }
         lines.push(Line::from(spans));
+    }
+    for (r, c) in super::wrapped_hits(&lines, &clicks, inner, scroll) {
+        ctx.hit(r, c);
     }
     f.render_widget(
         Paragraph::new(lines)
