@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Live baseball in the terminal: scoreboard, gamecast, box score, scorecard and standings from the MLB Stats API"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/OpenR00t/Ballatui"
 readme = "README.md"
 keywords = ["baseball", "mlb", "tui", "ratatui", "scorecard"]
 categories = ["command-line-utilities"]
@@ -30,3 +31,8 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 lto = "thin"
 codegen-units = 4
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
